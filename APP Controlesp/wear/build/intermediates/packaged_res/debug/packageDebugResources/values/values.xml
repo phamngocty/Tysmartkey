@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="android_wear_capabilities">
+        <item>esp32_control</item>
+    </string-array>
+    <string name="app_name">Control-esp Wear</string>
+</resources>

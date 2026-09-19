@@ -1,0 +1,178 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.example.control_esp"
+4    android:versionCode="1"
+5    android:versionName="1.0" >
+6
+7    <uses-sdk
+7-->INJECTED
+8        android:minSdkVersion="30"
+8-->INJECTED
+9        android:targetSdkVersion="35" />
+9-->INJECTED
+10
+11    <uses-feature android:name="android.hardware.type.watch" />
+11-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:4:5-64
+11-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:4:19-61
+12
+13    <uses-permission android:name="android.permission.BLUETOOTH" />
+13-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:6:5-68
+13-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:6:22-65
+14    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+14-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:7:5-74
+14-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:7:22-71
+15    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+15-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:8:5-76
+15-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:8:22-73
+16    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+16-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:9:5-73
+16-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:9:22-70
+17
+18    <permission
+18-->[androidx.core:core:1.16.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\8bffcc8846e2d6bea6d5d4ac0c134303\transformed\core-1.16.0\AndroidManifest.xml:22:5-24:47
+19        android:name="com.example.control_esp.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+19-->[androidx.core:core:1.16.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\8bffcc8846e2d6bea6d5d4ac0c134303\transformed\core-1.16.0\AndroidManifest.xml:23:9-81
+20        android:protectionLevel="signature" />
+20-->[androidx.core:core:1.16.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\8bffcc8846e2d6bea6d5d4ac0c134303\transformed\core-1.16.0\AndroidManifest.xml:24:9-44
+21
+22    <uses-permission android:name="com.example.control_esp.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+22-->[androidx.core:core:1.16.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\8bffcc8846e2d6bea6d5d4ac0c134303\transformed\core-1.16.0\AndroidManifest.xml:26:5-97
+22-->[androidx.core:core:1.16.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\8bffcc8846e2d6bea6d5d4ac0c134303\transformed\core-1.16.0\AndroidManifest.xml:26:22-94
+23
+24    <application
+24-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:11:5-32:19
+25        android:allowBackup="true"
+25-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:12:9-35
+26        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+26-->[androidx.core:core:1.16.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\8bffcc8846e2d6bea6d5d4ac0c134303\transformed\core-1.16.0\AndroidManifest.xml:28:18-86
+27        android:debuggable="true"
+28        android:extractNativeLibs="false"
+28-->INJECTED
+29        android:icon="@drawable/ic_launcher_new"
+29-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:13:9-49
+30        android:label="@string/app_name"
+30-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:15:9-41
+31        android:roundIcon="@drawable/ic_launcher_new"
+31-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:14:9-54
+32        android:supportsRtl="true"
+32-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:16:9-35
+33        android:theme="@android:style/Theme.DeviceDefault" >
+33-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:17:9-59
+34        <uses-library
+34-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:19:9-21:39
+35            android:name="com.google.android.wearable"
+35-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:20:13-55
+36            android:required="true" />
+36-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:21:13-36
+37
+38        <activity
+38-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:23:9-31:20
+39            android:name="com.example.control_esp.wear.MainActivity"
+39-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:24:13-41
+40            android:exported="true"
+40-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:25:13-36
+41            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" >
+41-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:26:13-75
+42            <intent-filter>
+42-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:27:13-30:29
+43                <action android:name="android.intent.action.MAIN" />
+43-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:28:17-69
+43-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:28:25-66
+44
+45                <category android:name="android.intent.category.LAUNCHER" />
+45-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:29:17-77
+45-->D:\Documents\PlatformIO\Tysmartkey\APP Controlesp\wear\src\main\AndroidManifest.xml:29:27-74
+46            </intent-filter>
+47        </activity>
+48
+49        <uses-library
+49-->[androidx.wear.compose:compose-foundation:1.6.1] C:\Users\phamn\.gradle\caches\9.5.0\transforms\15d4c2d561bfa26e94d27b175318517c\transformed\compose-foundation-1.6.1\AndroidManifest.xml:23:9-25:40
+50            android:name="wear-sdk"
+50-->[androidx.wear.compose:compose-foundation:1.6.1] C:\Users\phamn\.gradle\caches\9.5.0\transforms\15d4c2d561bfa26e94d27b175318517c\transformed\compose-foundation-1.6.1\AndroidManifest.xml:24:13-36
+51            android:required="false" />
+51-->[androidx.wear.compose:compose-foundation:1.6.1] C:\Users\phamn\.gradle\caches\9.5.0\transforms\15d4c2d561bfa26e94d27b175318517c\transformed\compose-foundation-1.6.1\AndroidManifest.xml:25:13-37
+52
+53        <activity
+53-->[com.google.android.gms:play-services-base:18.5.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\0cf5456e6ec95ee2b51ff1f908a825b4\transformed\play-services-base-18.5.0\AndroidManifest.xml:5:9-173
+54            android:name="com.google.android.gms.common.api.GoogleApiActivity"
+54-->[com.google.android.gms:play-services-base:18.5.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\0cf5456e6ec95ee2b51ff1f908a825b4\transformed\play-services-base-18.5.0\AndroidManifest.xml:5:19-85
+55            android:exported="false"
+55-->[com.google.android.gms:play-services-base:18.5.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\0cf5456e6ec95ee2b51ff1f908a825b4\transformed\play-services-base-18.5.0\AndroidManifest.xml:5:146-170
+56            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+56-->[com.google.android.gms:play-services-base:18.5.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\0cf5456e6ec95ee2b51ff1f908a825b4\transformed\play-services-base-18.5.0\AndroidManifest.xml:5:86-145
+57
+58        <meta-data
+58-->[com.google.android.gms:play-services-basement:18.9.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\3a804a2aa226e174b2dc0c5a1623aed3\transformed\play-services-basement-18.9.0\AndroidManifest.xml:21:9-23:69
+59            android:name="com.google.android.gms.version"
+59-->[com.google.android.gms:play-services-basement:18.9.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\3a804a2aa226e174b2dc0c5a1623aed3\transformed\play-services-basement-18.9.0\AndroidManifest.xml:22:13-58
+60            android:value="@integer/google_play_services_version" />
+60-->[com.google.android.gms:play-services-basement:18.9.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\3a804a2aa226e174b2dc0c5a1623aed3\transformed\play-services-basement-18.9.0\AndroidManifest.xml:23:13-66
+61
+62        <provider
+62-->[androidx.emoji2:emoji2:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\ac7f2e966f741931469e1bf82b832bcf\transformed\emoji2-1.4.0\AndroidManifest.xml:24:9-32:20
+63            android:name="androidx.startup.InitializationProvider"
+63-->[androidx.emoji2:emoji2:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\ac7f2e966f741931469e1bf82b832bcf\transformed\emoji2-1.4.0\AndroidManifest.xml:25:13-67
+64            android:authorities="com.example.control_esp.androidx-startup"
+64-->[androidx.emoji2:emoji2:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\ac7f2e966f741931469e1bf82b832bcf\transformed\emoji2-1.4.0\AndroidManifest.xml:26:13-68
+65            android:exported="false" >
+65-->[androidx.emoji2:emoji2:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\ac7f2e966f741931469e1bf82b832bcf\transformed\emoji2-1.4.0\AndroidManifest.xml:27:13-37
+66            <meta-data
+66-->[androidx.emoji2:emoji2:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\ac7f2e966f741931469e1bf82b832bcf\transformed\emoji2-1.4.0\AndroidManifest.xml:29:13-31:52
+67                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+67-->[androidx.emoji2:emoji2:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\ac7f2e966f741931469e1bf82b832bcf\transformed\emoji2-1.4.0\AndroidManifest.xml:30:17-75
+68                android:value="androidx.startup" />
+68-->[androidx.emoji2:emoji2:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\ac7f2e966f741931469e1bf82b832bcf\transformed\emoji2-1.4.0\AndroidManifest.xml:31:17-49
+69            <meta-data
+69-->[androidx.lifecycle:lifecycle-process:2.9.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\0841f46020ff9846fa67015b1edd215c\transformed\lifecycle-process-2.9.0\AndroidManifest.xml:29:13-31:52
+70                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
+70-->[androidx.lifecycle:lifecycle-process:2.9.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\0841f46020ff9846fa67015b1edd215c\transformed\lifecycle-process-2.9.0\AndroidManifest.xml:30:17-78
+71                android:value="androidx.startup" />
+71-->[androidx.lifecycle:lifecycle-process:2.9.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\0841f46020ff9846fa67015b1edd215c\transformed\lifecycle-process-2.9.0\AndroidManifest.xml:31:17-49
+72            <meta-data
+72-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:29:13-31:52
+73                android:name="androidx.profileinstaller.ProfileInstallerInitializer"
+73-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:30:17-85
+74                android:value="androidx.startup" />
+74-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:31:17-49
+75        </provider>
+76
+77        <receiver
+77-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:34:9-52:20
+78            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+78-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:35:13-76
+79            android:directBootAware="false"
+79-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:36:13-44
+80            android:enabled="true"
+80-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:37:13-35
+81            android:exported="true"
+81-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:38:13-36
+82            android:permission="android.permission.DUMP" >
+82-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:39:13-57
+83            <intent-filter>
+83-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:40:13-42:29
+84                <action android:name="androidx.profileinstaller.action.INSTALL_PROFILE" />
+84-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:41:17-91
+84-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:41:25-88
+85            </intent-filter>
+86            <intent-filter>
+86-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:43:13-45:29
+87                <action android:name="androidx.profileinstaller.action.SKIP_FILE" />
+87-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:44:17-85
+87-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:44:25-82
+88            </intent-filter>
+89            <intent-filter>
+89-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:46:13-48:29
+90                <action android:name="androidx.profileinstaller.action.SAVE_PROFILE" />
+90-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:47:17-88
+90-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:47:25-85
+91            </intent-filter>
+92            <intent-filter>
+92-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:49:13-51:29
+93                <action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION" />
+93-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:50:17-95
+93-->[androidx.profileinstaller:profileinstaller:1.4.0] C:\Users\phamn\.gradle\caches\9.5.0\transforms\5f8480af6ba913f2230e20fbfc340b0c\transformed\profileinstaller-1.4.0\AndroidManifest.xml:50:25-92
+94            </intent-filter>
+95        </receiver>
+96    </application>
+97
+98</manifest>

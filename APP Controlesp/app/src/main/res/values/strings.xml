@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">Tsmart_key</string>
+    <string name="app_title">TỰ LÀM ĐIỆN TỬ tsmart_key</string>
+    <string name="status_disconnected">Chưa kết nối</string>
+    <string name="status_connected">Đã kết nối: %s</string>
+    <string name="status_connecting">Đang kết nối...</string>
+    <string name="status_failed">Kết nối thất bại</string>
+    <string name="btn_turn_on">Bật xe</string>
+    <string name="btn_turn_off">Tắt xe</string>
+    <string name="btn_start">Đề xe</string>
+    <string name="btn_auto">Tìm xe</string>
+    <string name="btn_connect_bt">Kết nối Bluetooth</string>
+    <string name="btn_disconnect_bt">Ngắt kết nối</string>
+    <string name="setting_show_info">Hiển thị thông tin tiêu đề</string>
+    <string name="setting_hide_nav">Ẩn thanh điều hướng</string>
+</resources>

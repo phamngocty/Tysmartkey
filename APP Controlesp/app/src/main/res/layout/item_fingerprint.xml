@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="10dp"
+    android:background="@drawable/card_luxury_gold_bg"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:padding="12dp">
+
+    <!-- Avatar ngón tay Luxury Gold -->
+    <FrameLayout
+        android:layout_width="42dp"
+        android:layout_height="42dp"
+        android:background="@drawable/avatar_fp_gold_bg">
+
+        <ImageView
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:layout_gravity="center"
+            android:src="@drawable/ic_fingerprint"
+            app:tint="@color/gold_primary" />
+    </FrameLayout>
+
+    <!-- Thông tin ngón tay -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="14dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/tvFpName"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Ngón cái phải (Chủ xe)"
+            android:textColor="@color/white"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvFpId"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="ID #1 • Đề máy + Mở nguồn"
+            android:textColor="@color/gold_primary"
+            android:textSize="11sp"
+            android:fontFamily="monospace" />
+    </LinearLayout>
+
+    <!-- 2 Nút Icon: Đổi tên & Xóa -->
+    <ImageButton
+        android:id="@+id/btnEditFp"
+        android:layout_width="34dp"
+        android:layout_height="34dp"
+        android:background="@drawable/header_icon_btn_bg"
+        android:src="@drawable/ic_edit"
+        app:tint="@color/text_secondary"
+        android:padding="7dp"
+        android:layout_marginEnd="6dp"
+        android:contentDescription="Đổi tên vân tay" />
+
+    <ImageButton
+        android:id="@+id/btnDeleteFp"
+        android:layout_width="34dp"
+        android:layout_height="34dp"
+        android:background="@drawable/header_icon_btn_bg"
+        android:src="@drawable/ic_delete"
+        app:tint="@color/accent_danger"
+        android:padding="7dp"
+        android:contentDescription="Xóa vân tay" />
+
+</LinearLayout>

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="bg_dark">#07090E</color>
+    <color name="card_bg">#121826</color>
+    <color name="surface_elevated">#1A2336</color>
+    <color name="border_subtle">#2A364F</color>
+    <color name="primary_blue">#00F0FF</color>
+    <color name="primary_red">#FF3366</color>
+    <color name="secondary_teal">#00E676</color>
+    <color name="error_red">#FF3366</color>
+    <color name="accent_danger">#FF3366</color>
+    <color name="success_green">#00E676</color>
+    <color name="accent_amber">#FFB703</color>
+    <color name="accent_cyan">#00F0FF</color>
+    <color name="text_primary">#F8FAFC</color>
+    <color name="text_secondary">#8899AC</color>
+    <color name="text_muted">#516277</color>
+    <color name="glow_cyan">#4000F0FF</color>
+    <color name="glow_red">#40FF3366</color>
+    <color name="glow_amber">#40FFB703</color>
+
+    <!-- PALETTE MẪU 1: LUXURY GOLD & OBSIDIAN -->
+    <color name="gold_primary">#D4AF37</color>
+    <color name="gold_bright">#FFD700</color>
+    <color name="gold_dark">#AA7C11</color>
+    <color name="gold_glow">#40D4AF37</color>
+    <color name="gold_surface">#181E2E</color>
+    <color name="gold_border">#33D4AF37</color>
+    <color name="gold_border_active">#80D4AF37</color>
+    <color name="gold_secondary">#886A20</color>
+    <color name="accent_emerald">#10B981</color>
+    <color name="obsidian_bg">#070A10</color>
+    <color name="obsidian_card">#0F1420</color>
+</resources>

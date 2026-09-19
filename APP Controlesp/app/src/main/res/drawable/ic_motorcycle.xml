@@ -1,0 +1,51 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="70dp"
+    android:viewportWidth="240"
+    android:viewportHeight="120">
+  <!-- Rear Wheel -->
+  <path
+      android:strokeColor="@color/text_muted"
+      android:strokeWidth="6"
+      android:fillColor="#070A10"
+      android:pathData="M50,85m-26,0a26,26 0 1,1 52,0a26,26 0 1,1 -52,0"/>
+  <path
+      android:fillColor="@color/accent_cyan"
+      android:pathData="M50,85m-4,0a4,4 0 1,1 8,0a4,4 0 1,1 -8,0"/>
+
+  <!-- Front Wheel -->
+  <path
+      android:strokeColor="@color/text_muted"
+      android:strokeWidth="6"
+      android:fillColor="#070A10"
+      android:pathData="M190,85m-26,0a26,26 0 1,1 52,0a26,26 0 1,1 -52,0"/>
+  <path
+      android:fillColor="@color/accent_cyan"
+      android:pathData="M190,85m-4,0a4,4 0 1,1 8,0a4,4 0 1,1 -8,0"/>
+
+  <!-- Frame -->
+  <path
+      android:strokeColor="#334155"
+      android:strokeWidth="5"
+      android:strokeLineCap="round"
+      android:strokeLineJoin="round"
+      android:pathData="M50,85 L90,70 L130,70 L170,45 L190,85"/>
+  <path
+      android:strokeColor="@color/accent_cyan"
+      android:strokeWidth="7"
+      android:strokeLineCap="round"
+      android:strokeLineJoin="round"
+      android:pathData="M90,70 L110,40 L160,40"/>
+  <!-- Seat -->
+  <path
+      android:strokeColor="#1E293B"
+      android:strokeWidth="8"
+      android:strokeLineCap="round"
+      android:pathData="M80,40 C95,38 120,38 135,44"/>
+  <!-- Handlebars -->
+  <path
+      android:strokeColor="#64748B"
+      android:strokeWidth="5"
+      android:strokeLineCap="round"
+      android:pathData="M165,32 L150,24"/>
+</vector>

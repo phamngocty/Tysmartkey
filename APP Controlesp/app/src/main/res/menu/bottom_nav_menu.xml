@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_home"
+        android:icon="@drawable/ic_power"
+        android:title="Điều khiển" />
+    <item
+        android:id="@+id/nav_advanced"
+        android:icon="@drawable/ic_auto"
+        android:title="Tìm xe" />
+    <item
+        android:id="@+id/nav_fingerprint"
+        android:icon="@drawable/ic_fingerprint"
+        android:title="Vân tay" />
+    <item
+        android:id="@+id/nav_settings"
+        android:icon="@drawable/ic_settings"
+        android:title="Cài đặt" />
+</menu>
