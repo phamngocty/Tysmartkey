@@ -17,9 +17,13 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.animation.AlphaAnimation
 import android.view.animation.Animation
+import android.graphics.Bitmap
+import android.util.Base64
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
+import androidx.cardview.widget.CardView
 import androidx.core.content.ContextCompat
 import com.google.android.gms.wearable.*
 import com.google.android.material.bottomnavigation.BottomNavigationView
@@ -96,6 +100,10 @@ class MainActivity : AppCompatActivity() {
     private var tvEnrollTouchCountRef: TextView? = null
     private var tvEnrollPercentRef: TextView? = null
     private var currentEnrollName: String = "Vân tay mới"
+    private var currentEnrollSendImage: Boolean = false
+    private var cvEnrollImageCardRef: CardView? = null
+    private var ivEnrollFingerprintImageRef: ImageView? = null
+    private var enrollImageBuffer = StringBuilder()
 
     // Quản lý Chế độ Chống Nước Mưa (Anti-Rain Mode)
     private var isRainEnabled = false
@@ -114,6 +122,8 @@ class MainActivity : AppCompatActivity() {
     private var fpSecLevelVal = 2
     private var fpScanTimeVal = 1200
     private var fpEnrollModeVal = 4
+    private var fpSendImageVal = false
+    private var swFpSendImageRef: SwitchCompat? = null
     private var tvFpTestStatusRef: TextView? = null
     private var tvFpSecLevelValRef: TextView? = null
     private var tvFpSecLevelDescRef: TextView? = null
@@ -497,7 +507,7 @@ class MainActivity : AppCompatActivity() {
                 .show()
         }
 
-        val btnFpSettings = findViewById<ImageButton>(R.id.btnFpSettings)
+        val btnFpSettings = findViewById<Button>(R.id.btnFpSettings)
         btnFpSettings?.setOnClickListener {
             showFingerprintSettingsDialog()
         }
@@ -770,6 +780,37 @@ class MainActivity : AppCompatActivity() {
                 status.startsWith("FP_ENROLL_STEP_3") -> {
                     // Fallback
                 }
+                status.startsWith("FP_IMG_START") -> {
+                    enrollImageBuffer.setLength(0)
+                    tvEnrollStepDescRef?.text = "📸 Đang truyền ảnh vân tay từ cảm biến..."
+                }
+                status.startsWith("FP_IMG_CHUNK|") -> {
+                    val chunk = status.substringAfter("FP_IMG_CHUNK|").trim()
+                    if (chunk.isNotEmpty()) {
+                        enrollImageBuffer.append(chunk)
+                    }
+                }
+                status == "FP_IMG_END" -> {
+                    val fullB64 = enrollImageBuffer.toString()
+                    enrollImageBuffer.setLength(0)
+                    if (fullB64.isNotEmpty()) {
+                        try {
+                            val rawBytes = Base64.decode(fullB64, Base64.DEFAULT)
+                            val bmp = decodeR503ImageToBitmap(rawBytes, 192, 192)
+                            if (bmp != null) {
+                                ivEnrollFingerprintImageRef?.setImageBitmap(bmp)
+                                cvEnrollImageCardRef?.visibility = View.VISIBLE
+                                val anim = AlphaAnimation(0.2f, 1f).apply {
+                                    duration = 350
+                                }
+                                cvEnrollImageCardRef?.startAnimation(anim)
+                                tvEnrollStepDescRef?.text = "📸 Đã nhận ảnh vân tay thành công!"
+                            }
+                        } catch (e: Exception) {
+                            Log.e("FP_IMG", "Decode image error", e)
+                        }
+                    }
+                }
                 status == "FP_ENROLL_LIFT_FIRST" -> {
                     tvEnrollStepDescRef?.text = "⚠️ Phát hiện ngón tay đặt sẵn!\nVui lòng nhấc ngón tay ra khỏi cảm biến để bắt đầu."
                     triggerHapticFeedback()
@@ -945,7 +986,8 @@ class MainActivity : AppCompatActivity() {
                         val secLevel = parts[1].toIntOrNull() ?: 2
                         val scanWin = parts[2].toIntOrNull() ?: 1200
                         val enrollMode = parts[3].toIntOrNull() ?: 4
-                        updateFpSettingsDialogUI(secLevel, scanWin, enrollMode)
+                        val sendImg = if (parts.size >= 5) parts[4] == "1" else getSharedPreferences("BT_PREF", MODE_PRIVATE).getBoolean("FP_SEND_IMG", false)
+                        updateFpSettingsDialogUI(secLevel, scanWin, enrollMode, sendImg)
                     }
                 }
                 status == "FP_CFG_OK" -> {
@@ -1231,6 +1273,9 @@ class MainActivity : AppCompatActivity() {
         pbEnrollProgressRef = null
         tvEnrollTouchCountRef = null
         tvEnrollPercentRef = null
+        cvEnrollImageCardRef = null
+        ivEnrollFingerprintImageRef = null
+        enrollImageBuffer.setLength(0)
     }
 
     private fun showAddFingerprintDialog() {
@@ -1292,6 +1337,43 @@ class MainActivity : AppCompatActivity() {
         }
         container.addView(quickTagsLayout)
 
+        // Toggle truyền hình ảnh vân tay khi quét
+        val prefs = getSharedPreferences("BT_PREF", MODE_PRIVATE)
+        val initialSendImg = prefs.getBoolean("FP_SEND_IMG", false)
+
+        val switchLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, 30, 0, 0)
+        }
+        val textLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val tvSwTitle = TextView(this).apply {
+            text = "Gửi ảnh vân tay khi lấy mẫu"
+            setTextColor(getColor(R.color.white))
+            textSize = 13f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+        }
+        val tvSwSub = TextView(this).apply {
+            text = "Hiển thị ảnh 192x192 lên màn hình (+2s)"
+            setTextColor(getColor(R.color.text_secondary))
+            textSize = 11f
+        }
+        textLayout.addView(tvSwTitle)
+        textLayout.addView(tvSwSub)
+        switchLayout.addView(textLayout)
+
+        val swSendImage = SwitchCompat(this).apply {
+            isChecked = initialSendImg
+            setOnCheckedChangeListener { _, isChecked ->
+                prefs.edit().putBoolean("FP_SEND_IMG", isChecked).apply()
+            }
+        }
+        switchLayout.addView(swSendImage)
+        container.addView(switchLayout)
+
         AlertDialog.Builder(this)
             .setTitle("Thêm Vân Tay Mới (R503)")
             .setView(container)
@@ -1299,14 +1381,17 @@ class MainActivity : AppCompatActivity() {
                 val typedName = input.text.toString().trim()
                 val finalName = if (typedName.isNotEmpty()) typedName else defaultName
                 val cleanName = finalName.replace("|", "").replace("\n", "").replace("\r", "").take(30)
-                startEnrollProcess(cleanName)
+                val sendImg = swSendImage.isChecked
+                startEnrollProcess(cleanName, sendImg)
             }
             .setNegativeButton("Hủy", null)
             .show()
     }
 
-    private fun startEnrollProcess(fingerName: String) {
+    private fun startEnrollProcess(fingerName: String, sendImage: Boolean = false) {
         currentEnrollName = fingerName
+        currentEnrollSendImage = sendImage
+        enrollImageBuffer.setLength(0)
 
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_enroll_fingerprint, null)
         val tvFingerName = dialogView.findViewById<TextView>(R.id.tvEnrollFingerName)
@@ -1317,6 +1402,12 @@ class MainActivity : AppCompatActivity() {
         val pbProgress = dialogView.findViewById<ProgressBar>(R.id.pbEnrollProgress)
         val tvTouchCount = dialogView.findViewById<TextView>(R.id.tvEnrollTouchCount)
         val tvPercent = dialogView.findViewById<TextView>(R.id.tvEnrollPercent)
+        val cvImageCard = dialogView.findViewById<CardView>(R.id.cvEnrollImageCard)
+        val ivFpImage = dialogView.findViewById<ImageView>(R.id.ivEnrollFingerprintImage)
+
+        cvEnrollImageCardRef = cvImageCard
+        ivEnrollFingerprintImageRef = ivFpImage
+        cvEnrollImageCardRef?.visibility = View.GONE
 
         tvFingerName.text = "Tên: $fingerName"
         tvStepDesc.text = "Đang kết nối cảm biến R503..."
@@ -1347,7 +1438,8 @@ class MainActivity : AppCompatActivity() {
         enrollCustomDialog?.show()
         startEnrollTimer(60)
 
-        sendVehicleCommand("FP_ENROLL|$fingerName")
+        val cmd = if (sendImage) "FP_ENROLL|$fingerName|IMG" else "FP_ENROLL|$fingerName|NO_IMG"
+        sendVehicleCommand(cmd)
     }
 
     private fun showRenameDialog(item: FingerprintItem) {
@@ -1383,6 +1475,7 @@ class MainActivity : AppCompatActivity() {
         val rgEnrollMode = dialogView.findViewById<RadioGroup>(R.id.rgFpEnrollMode)
         val rb4Touch = dialogView.findViewById<RadioButton>(R.id.rbEnroll4Touch)
         val rb2Touch = dialogView.findViewById<RadioButton>(R.id.rbEnroll2Touch)
+        val swSendImage = dialogView.findViewById<SwitchCompat>(R.id.swFpSendImage)
         val btnLiveTest = dialogView.findViewById<Button>(R.id.btnFpLiveTest)
         val tvTestStatus = dialogView.findViewById<TextView>(R.id.tvFpTestStatus)
         val btnCancel = dialogView.findViewById<Button>(R.id.btnCancelFpSettings)
@@ -1396,6 +1489,7 @@ class MainActivity : AppCompatActivity() {
         rgFpEnrollModeRef = rgEnrollMode
         rbEnroll4TouchRef = rb4Touch
         rbEnroll2TouchRef = rb2Touch
+        swFpSendImageRef = swSendImage
         tvFpTestStatusRef = tvTestStatus
 
         // Security level slider: max 4 (0 -> 4 corresponds to level 1 -> 5)
@@ -1431,6 +1525,14 @@ class MainActivity : AppCompatActivity() {
             rb4Touch.isChecked = true
         }
 
+        val prefs = getSharedPreferences("BT_PREF", MODE_PRIVATE)
+        fpSendImageVal = prefs.getBoolean("FP_SEND_IMG", false)
+        swSendImage?.isChecked = fpSendImageVal
+        swSendImage?.setOnCheckedChangeListener { _, isChecked ->
+            fpSendImageVal = isChecked
+            prefs.edit().putBoolean("FP_SEND_IMG", isChecked).apply()
+        }
+
         btnLiveTest.setOnClickListener {
             sendVehicleCommand("TEST_FP|15")
             tvTestStatus.text = "⏳ Chế độ test đang chạy (15s). Hãy đặt ngón tay lên cảm biến R503 ngay bây giờ!"
@@ -1444,7 +1546,9 @@ class MainActivity : AppCompatActivity() {
         btnSave.setOnClickListener {
             val enrollMode = if (rb2Touch.isChecked) 2 else 4
             fpEnrollModeVal = enrollMode
-            sendVehicleCommand("SET_FP_CFG|$fpSecLevelVal|$fpScanTimeVal|$fpEnrollModeVal")
+            val sendImgInt = if (swSendImage?.isChecked == true) 1 else 0
+            sendVehicleCommand("SET_FP_CFG|$fpSecLevelVal|$fpScanTimeVal|$fpEnrollModeVal|$sendImgInt")
+            fpSettingsDialog?.dismiss()
         }
 
         fpSettingsDialog?.dismiss()
@@ -1471,10 +1575,11 @@ class MainActivity : AppCompatActivity() {
         tvFpSecLevelDescRef?.text = desc
     }
 
-    private fun updateFpSettingsDialogUI(secLevel: Int, scanWin: Int, enrollMode: Int) {
+    private fun updateFpSettingsDialogUI(secLevel: Int, scanWin: Int, enrollMode: Int, sendImg: Boolean = false) {
         fpSecLevelVal = secLevel.coerceIn(1, 5)
         fpScanTimeVal = scanWin.coerceIn(400, 3000)
         fpEnrollModeVal = if (enrollMode == 2) 2 else 4
+        fpSendImageVal = sendImg
 
         sbFpSecLevelRef?.progress = (fpSecLevelVal - 1).coerceIn(0, 4)
         updateSecLevelText(fpSecLevelVal)
@@ -1488,6 +1593,42 @@ class MainActivity : AppCompatActivity() {
         } else {
             rbEnroll4TouchRef?.isChecked = true
         }
+
+        swFpSendImageRef?.isChecked = fpSendImageVal
+        getSharedPreferences("BT_PREF", MODE_PRIVATE).edit().putBoolean("FP_SEND_IMG", fpSendImageVal).apply()
+    }
+
+    private fun decodeR503ImageToBitmap(rawBytes: ByteArray, width: Int = 192, height: Int = 192): Bitmap? {
+        val totalPixels = width * height
+        val neededBytes = totalPixels / 2
+        if (rawBytes.size < neededBytes) {
+            Log.w("FP_IMG", "Decoded bytes too short: ${rawBytes.size} < $neededBytes")
+            return null
+        }
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val pixels = IntArray(totalPixels)
+        var byteIdx = 0
+        for (i in 0 until totalPixels step 2) {
+            if (byteIdx >= rawBytes.size) break
+            val b = rawBytes[byteIdx].toInt() and 0xFF
+            byteIdx++
+
+            // Pixel 1: high nibble (4 bits)
+            val p1 = (b ushr 4) and 0x0F
+            // Pixel 2: low nibble (4 bits)
+            val p2 = b and 0x0F
+
+            // R503 optical sensor: 0 is dark (ridge), 15 (0xF) is bright (background)
+            val g1 = p1 * 17
+            val g2 = p2 * 17
+
+            pixels[i] = (0xFF shl 24) or (g1 shl 16) or (g1 shl 8) or g1
+            if (i + 1 < totalPixels) {
+                pixels[i + 1] = (0xFF shl 24) or (g2 shl 16) or (g2 shl 8) or g2
+            }
+        }
+        bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
+        return bitmap
     }
 
     // ==========================================

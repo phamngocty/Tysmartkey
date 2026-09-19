@@ -2,6 +2,7 @@
 #include <NimBLEDevice.h>
 #include <Preferences.h>
 #include <Adafruit_Fingerprint.h>
+#include <mbedtls/base64.h>
 
 // ==========================================
 // 📌 1. ĐỊNH NGHĨA CHÂN PHẦN CỨNG (ESP32-C3)
@@ -64,6 +65,7 @@ int wrongFingerAttempts = 0;
 int fpSecurityLevel = 2;          // Mức bảo mật R503: 1 (rất nhạy) -> 5 (rất khắt khe), mặc định 2
 int fpScanWindowMs = 1200;         // Thời gian quét đối chiếu liên tục khi áp ngón tay (ms)
 int fpEnrollMode = 4;             // Chế độ lấy mẫu: 4 lần chạm (đa góc độ) hoặc 2 lần chạm
+bool fpSendEnrollImage = false;   // Gửi ảnh vân tay khi lấy mẫu (bật/tắt theo yêu cầu)
 bool isTestingFingerprint = false; // Chế độ test cảm biến không bật/tắt xe
 unsigned long testFpUntil = 0;
 
@@ -250,6 +252,113 @@ int getNextFreeFingerIdExcluding(int excludeId) {
     return -1;
 }
 
+// Trích xuất ảnh vân tay thô từ cảm biến R503 và truyền qua BLE (Base64 chunks)
+bool streamR503ImageOverBle() {
+    Serial.println("📷 Bắt đầu trích xuất ảnh vân tay từ R503...");
+    while (r503Serial.available()) r503Serial.read(); // Xóa sạch buffer UART trước khi gửi
+
+    // Gói tin lệnh UpImage (0x0A): Header (2) + Addr (4) + Type (1) + Len (2) + Cmd (1) + Checksum (2)
+    uint8_t cmd[] = {0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0x01, 0x00, 0x03, 0x0A, 0x00, 0x0E};
+    r503Serial.write(cmd, sizeof(cmd));
+    r503Serial.flush();
+
+    auto readExact = [](uint8_t *buf, size_t len, unsigned long timeoutMs) -> bool {
+        size_t n = 0;
+        unsigned long start = millis();
+        while (n < len && (millis() - start < timeoutMs)) {
+            if (r503Serial.available()) {
+                buf[n++] = r503Serial.read();
+                start = millis();
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(1));
+            }
+        }
+        return (n == len);
+    };
+
+    // Đọc gói tin ACK phản hồi (12 bytes)
+    uint8_t ack[12];
+    if (!readExact(ack, 12, 1200)) {
+        Serial.println("❌ Hết thời gian chờ phản hồi ACK UpImage từ R503");
+        notifyStatus("FP_IMG_ERR");
+        return false;
+    }
+
+    // Kiểm tra mã xác nhận (index 9: 0x00 = OK)
+    if (ack[6] != 0x07 || ack[9] != 0x00) {
+        Serial.printf("❌ R503 từ chối gửi ảnh (Mã phản hồi: 0x%02X)\n", ack[9]);
+        notifyStatus("FP_IMG_ERR");
+        return false;
+    }
+
+    notifyStatus("FP_IMG_START|192|192");
+    vTaskDelay(pdMS_TO_TICKS(20));
+
+    bool finished = false;
+    int packetCount = 0;
+    unsigned char base64Buf[384];
+
+    while (!finished) {
+        if (cancelEnrollRequested) {
+            notifyStatus("FP_IMG_ERR");
+            return false;
+        }
+
+        // Đọc 9 bytes đầu tiên của Data Packet: Header(2), Addr(4), PID(1), Length(2)
+        uint8_t header[9];
+        if (!readExact(header, 9, 1500)) {
+            Serial.println("❌ Lỗi đọc header gói dữ liệu ảnh R503");
+            notifyStatus("FP_IMG_ERR");
+            return false;
+        }
+
+        if (header[0] != 0xEF || header[1] != 0x01) {
+            Serial.println("❌ Sai Header gói dữ liệu ảnh R503");
+            notifyStatus("FP_IMG_ERR");
+            return false;
+        }
+
+        uint8_t pid = header[6]; // 0x02 = Data, 0x08 = EndData
+        uint16_t length = ((uint16_t)header[7] << 8) | header[8];
+        if (length < 2 || length > 300) {
+            Serial.printf("❌ Độ dài gói dữ liệu ảnh bất thường: %d\n", length);
+            notifyStatus("FP_IMG_ERR");
+            return false;
+        }
+
+        uint16_t payloadLen = length - 2; // Trừ đi 2 bytes checksum
+        uint8_t payload[256];
+        if (!readExact(payload, payloadLen, 1500)) {
+            Serial.println("❌ Lỗi đọc payload ảnh R503");
+            notifyStatus("FP_IMG_ERR");
+            return false;
+        }
+
+        // Đọc 2 bytes checksum
+        uint8_t chk[2];
+        readExact(chk, 2, 500);
+
+        // Mã hóa payload thành Base64
+        size_t olen = 0;
+        mbedtls_base64_encode(base64Buf, sizeof(base64Buf), &olen, payload, payloadLen);
+        base64Buf[olen] = '\0';
+
+        notifyStatus("FP_IMG_CHUNK|" + String((char*)base64Buf));
+        packetCount++;
+
+        if (pid == 0x08) {
+            finished = true;
+            break;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(15)); // Giãn cách nhẹ để BLE stack xử lý mượt mà
+    }
+
+    notifyStatus("FP_IMG_END");
+    Serial.printf("✅ Đã truyền xong toàn bộ ảnh vân tay (%d gói tin) qua BLE!\n", packetCount);
+    return true;
+}
+
 // Task xử lý chu trình thêm vân tay chạy nền trong FreeRTOS (Không làm đơ BLE / NimBLE)
 void enrollTask(void *pvParameters) {
     String fingerName = "Van tay moi";
@@ -307,6 +416,12 @@ void enrollTask(void *pvParameters) {
 
                     int p = finger.getImage();
                     if (p == FINGERPRINT_OK) {
+                        // Nếu bật tùy chọn gửi ảnh, trích xuất ảnh thô ngay sau khi chụp thành công
+                        if (fpSendEnrollImage) {
+                            notifyStatus("FP_IMG_FETCHING");
+                            streamR503ImageOverBle();
+                        }
+
                         p = finger.image2Tz(bufferSlot);
                         if (p == FINGERPRINT_OK) {
                             return true; // Thành công lấy mẫu và trích xuất đặc trưng!
@@ -640,7 +755,14 @@ void listAllFingerprints() {
 void clearAllFingerprints() {
     Serial.println("🗑️ Bắt đầu xóa TOÀN BỘ vân tay...");
     int p = finger.emptyDatabase();
-    delay(400); // Đợi Flash ROM của R503 xóa sạch hoàn toàn
+    delay(500); // Đợi Flash ROM của R503 xóa sạch hoàn toàn
+    
+    // Xóa cưỡng chế toàn bộ các slot trong R503 để phòng ngừa lệnh emptyDatabase không xóa hết hoặc lỗi
+    int maxCap = getMaxCapacity();
+    for (int i = 1; i <= maxCap; i++) {
+        finger.deleteModel(i);
+    }
+    
     finger.getTemplateCount();
     Serial.printf("emptyDatabase R503 trả về mã: %d, còn lại: %d mẫu\n", p, finger.templateCount);
     
@@ -743,7 +865,11 @@ void handleFingerprintTouch() {
 
     // XỬ LÝ KHI ĐANG Ở CHẾ ĐỘ TEST CẢM BIẾN (LIVE TEST TỪ APP)
     if (isTestingFingerprint) {
-        if (matched) {
+        int id = matchedId;
+        String key = "name_" + String(id);
+        bool isRegistered = (id > 0) && prefsFinger.isKey(key.c_str());
+
+        if (matched && isRegistered) {
             int primaryId = matchedId;
             String parentKey = "parent_" + String(matchedId);
             if (prefsFinger.isKey(parentKey.c_str())) {
@@ -755,6 +881,10 @@ void handleFingerprintTouch() {
             ledSuccess();
             beep(1, 80);
         } else {
+            if (matched && !isRegistered) {
+                Serial.printf("⚠️ [TEST] Phát hiện vân tay ID %d trong R503 nhưng KHÔNG có trong NVS Flash. Dọn dẹp model mồ côi...\n", id);
+                finger.deleteModel(id);
+            }
             Serial.println("🔬 TEST NOT MATCH: Không nhận diện được vân tay.");
             notifyStatus("FP_TEST_RESULT|-1|Không khớp|0");
             ledError();
@@ -860,7 +990,8 @@ void sendRainConfig() {
 // Gửi cấu hình Tinh chỉnh Vân tay qua BLE
 void sendFingerprintConfig() {
     String resp = "FP_CFG|" + String(fpSecurityLevel) + "|" +
-                  String(fpScanWindowMs) + "|" + String(fpEnrollMode);
+                  String(fpScanWindowMs) + "|" + String(fpEnrollMode) + "|" +
+                  String(fpSendEnrollImage ? 1 : 0);
     notifyStatus(resp);
 }
 
@@ -928,7 +1059,19 @@ void processIncomingCommand(String data) {
     }
     else if (cmd == "FP_ENROLL") {
         String fingerName = params.length() > 0 ? params : "Vân tay mới";
+        if (fingerName.endsWith("|IMG")) {
+            fpSendEnrollImage = true;
+            fingerName = fingerName.substring(0, fingerName.length() - 4);
+        } else if (fingerName.endsWith("|NO_IMG")) {
+            fpSendEnrollImage = false;
+            fingerName = fingerName.substring(0, fingerName.length() - 7);
+        }
         startEnrollTask(fingerName);
+    }
+    else if (cmd == "SET_FP_IMG_MODE") {
+        fpSendEnrollImage = (params == "1");
+        prefsFinger.putBool("send_img", fpSendEnrollImage);
+        notifyStatus("FP_IMG_MODE|" + String(fpSendEnrollImage ? "1" : "0"));
     }
     else if (cmd == "FP_CANCEL") {
         cancelEnrollRequested = true;
@@ -954,13 +1097,20 @@ void processIncomingCommand(String data) {
         sendFingerprintConfig();
     }
     else if (cmd == "SET_FP_CFG") {
-        // Gói tin: <KEY>|SET_FP_CFG|<sec_level>|<scan_win>|<enroll_mode>
+        // Gói tin: <KEY>|SET_FP_CFG|<sec_level>|<scan_win>|<enroll_mode>[|<send_img>]
         int p1 = params.indexOf('|');
         int p2 = params.indexOf('|', p1 + 1);
         if (p1 != -1 && p2 != -1) {
             fpSecurityLevel = params.substring(0, p1).toInt();
             fpScanWindowMs = params.substring(p1 + 1, p2).toInt();
-            fpEnrollMode = params.substring(p2 + 1).toInt();
+            int p3 = params.indexOf('|', p2 + 1);
+            if (p3 != -1) {
+                fpEnrollMode = params.substring(p2 + 1, p3).toInt();
+                fpSendEnrollImage = (params.substring(p3 + 1).toInt() == 1);
+                prefsFinger.putBool("send_img", fpSendEnrollImage);
+            } else {
+                fpEnrollMode = params.substring(p2 + 1).toInt();
+            }
 
             if (fpSecurityLevel < 1) fpSecurityLevel = 1;
             if (fpSecurityLevel > 5) fpSecurityLevel = 5;
@@ -976,8 +1126,8 @@ void processIncomingCommand(String data) {
                 finger.setSecurityLevel(fpSecurityLevel);
             }
 
-            Serial.printf("✅ Đã cập nhật FP Config: SecLevel=%d, ScanWin=%d, EnrollMode=%d\n",
-                          fpSecurityLevel, fpScanWindowMs, fpEnrollMode);
+            Serial.printf("✅ Đã cập nhật FP Config: SecLevel=%d, ScanWin=%d, EnrollMode=%d, SendImg=%d\n",
+                          fpSecurityLevel, fpScanWindowMs, fpEnrollMode, fpSendEnrollImage ? 1 : 0);
             sendFingerprintConfig();
             notifyStatus("FP_CFG_OK");
             beep(1, 80);
@@ -1164,8 +1314,9 @@ void setup() {
     fpSecurityLevel = prefsFinger.getInt("sec_level", 2);
     fpScanWindowMs = prefsFinger.getInt("scan_win", 1200);
     fpEnrollMode = prefsFinger.getInt("enroll_mode", 4);
-    Serial.printf("🔍 FP Config: SecLevel=%d | ScanWin=%dms | EnrollMode=%d\n",
-                  fpSecurityLevel, fpScanWindowMs, fpEnrollMode);
+    fpSendEnrollImage = prefsFinger.getBool("send_img", false);
+    Serial.printf("🔍 FP Config: SecLevel=%d | ScanWin=%dms | EnrollMode=%d | SendImg=%d\n",
+                  fpSecurityLevel, fpScanWindowMs, fpEnrollMode, fpSendEnrollImage ? 1 : 0);
 
 
     // KHÔI PHỤC NGAY LẬP TỨC TRẠNG THÁI RELAY KHI KHỞI ĐỘNG (FAIL-SAFE)

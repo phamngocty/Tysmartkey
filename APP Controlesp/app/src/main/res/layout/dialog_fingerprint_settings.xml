@@ -264,7 +264,53 @@
             </RadioGroup>
         </LinearLayout>
 
-        <!-- 4. CHẠM THỬ NGÓN TAY ĐỂ TEST CẢM BIẾN (LIVE TEST) -->
+        <!-- 4. GỬI ẢNH VÂN TAY KHI LẤY MẪU (LIVE FINGERPRINT IMAGE STREAM) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/header_icon_btn_bg"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:layout_marginBottom="14dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Gửi ảnh vân tay khi lấy mẫu"
+                        android:textColor="@color/white"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="Hiển thị trực quan ảnh vân tay 192x192 lên màn hình (+2s)"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/swFpSendImage"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checked="false" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 5. CHẠM THỬ NGÓN TAY ĐỂ TEST CẢM BIẾN (LIVE TEST) -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
