@@ -741,80 +741,461 @@
                 android:orientation="vertical"
                 android:padding="18dp">
 
-                <!-- CARD MÔ PHỎNG CẢM BIẾN R503 VIỀN KIM LOẠI VÀNG -->
+                <!-- 1. HERO BIOMETRIC SCANNER (LĂNG KÍNH QUANG HỌC R503 HUD) -->
+                <LinearLayout
+                    android:id="@+id/cardFpHeroScanner"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/card_cyber_bg"
+                    android:orientation="vertical"
+                    android:gravity="center_horizontal"
+                    android:paddingVertical="20dp"
+                    android:paddingHorizontal="16dp"
+                    android:layout_marginBottom="14dp">
+
+                    <!-- Top Header: Chip R503 Optical -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="12dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="BIOMETRIC RADAR • R503"
+                            android:textColor="@color/gold_primary"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:letterSpacing="0.08" />
+
+                        <TextView
+                            android:id="@+id/tvTabImageDpiBadge"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/card_telemetry_bg"
+                            android:paddingHorizontal="10dp"
+                            android:paddingVertical="4dp"
+                            android:text="508 DPI • 192×192"
+                            android:textColor="@color/primary_blue"
+                            android:textSize="10sp"
+                            android:fontFamily="monospace"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <!-- Center Circular Scanner Eye (Aura Gold Ring) -->
+                    <FrameLayout
+                        android:id="@+id/flScannerRing"
+                        android:layout_width="120dp"
+                        android:layout_height="120dp"
+                        android:layout_marginVertical="6dp">
+
+                        <!-- Outer Glow Ring -->
+                        <View
+                            android:layout_width="120dp"
+                            android:layout_height="120dp"
+                            android:layout_gravity="center"
+                            android:background="@drawable/button_power_ring_glow"
+                            android:alpha="0.25" />
+
+                        <!-- Metallic Gold Ring -->
+                        <View
+                            android:layout_width="112dp"
+                            android:layout_height="112dp"
+                            android:layout_gravity="center"
+                            android:background="@drawable/r503_gold_ring" />
+
+                        <!-- Cutout Card for Live Optical Image -->
+                        <androidx.cardview.widget.CardView
+                            android:layout_width="96dp"
+                            android:layout_height="96dp"
+                            android:layout_gravity="center"
+                            app:cardCornerRadius="48dp"
+                            app:cardElevation="0dp"
+                            app:cardBackgroundColor="@android:color/black">
+
+                            <ImageView
+                                android:id="@+id/ivTabFingerprintImage"
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:scaleType="centerCrop"
+                                android:src="@drawable/ic_fingerprint" />
+
+                            <ProgressBar
+                                android:id="@+id/pbTabImageProgress"
+                                android:layout_width="38dp"
+                                android:layout_height="38dp"
+                                android:layout_gravity="center"
+                                android:visibility="gone"
+                                android:indeterminate="true" />
+                        </androidx.cardview.widget.CardView>
+                    </FrameLayout>
+
+                    <!-- Status Text -->
+                    <TextView
+                        android:id="@+id/tvFpSensorStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:text="● CẢM BIẾN SẴN SÀNG"
+                        android:textColor="@color/gold_bright"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.04"
+                        android:fontFamily="monospace" />
+
+                    <TextView
+                        android:id="@+id/tvTabImageStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="Chưa có ảnh quét thực tế"
+                        android:textColor="@color/white"
+                        android:textSize="12sp"
+                        android:fontFamily="monospace" />
+
+                    <TextView
+                        android:id="@+id/tvTabImageDesc"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:layout_marginBottom="14dp"
+                        android:text="Chạm ngón tay hoặc bấm 'Chụp lăng kính' để xem ảnh quang học."
+                        android:textColor="@color/text_secondary"
+                        android:textSize="11sp"
+                        android:gravity="center" />
+
+                    <!-- Quick Scanner Action Buttons (Pill Capsules) -->
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center">
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btnCaptureLiveImage"
+                            android:layout_width="wrap_content"
+                            android:layout_height="38dp"
+                            android:background="@drawable/btn_gold_hero"
+                            android:paddingHorizontal="18dp"
+                            android:text="📸 Chụp Lăng Kính"
+                            android:textAllCaps="false"
+                            android:textColor="@color/black"
+                            android:textSize="12sp"
+                            android:textStyle="bold"
+                            android:layout_marginEnd="10dp" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btnLiveTestQuick"
+                            android:layout_width="wrap_content"
+                            android:layout_height="38dp"
+                            android:background="@drawable/header_icon_btn_bg"
+                            android:paddingHorizontal="16dp"
+                            android:text="🔍 Quét Thử Mã Vân Tay"
+                            android:textAllCaps="false"
+                            android:textColor="@color/white"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <!-- Quick Image Stream Mode Toggle Capsule -->
+                    <LinearLayout
+                        android:id="@+id/btnToggleImageMode"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:background="@drawable/header_icon_btn_bg"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="14dp"
+                        android:paddingVertical="9dp">
+
+                        <ImageView
+                            android:id="@+id/ivImageModeIcon"
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:src="@drawable/ic_ble_signal"
+                            app:tint="@color/gold_primary" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="10dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:id="@+id/tvTabImageModeTitle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Chế độ truyền ảnh quang học"
+                                android:textColor="@color/white"
+                                android:textSize="12sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tvTabImageModeSubtitle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Tắt: Quẹt xe siêu tốc, tiết kiệm băng thông"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="10sp" />
+                        </LinearLayout>
+
+                        <androidx.appcompat.widget.SwitchCompat
+                            android:id="@+id/swTabImageMode"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- 2. QUICK ACTION GRID (2x2 CARDS) -->
+                <!-- ROW 1: Thêm vân tay & Chống mưa -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:background="@drawable/card_luxury_gold_bg"
-                    android:gravity="center_vertical"
                     android:orientation="horizontal"
-                    android:padding="16dp"
-                    android:layout_marginBottom="16dp">
+                    android:layout_marginBottom="10dp">
 
-                    <FrameLayout
-                        android:layout_width="52dp"
-                        android:layout_height="52dp"
-                        android:background="@drawable/r503_gold_ring">
+                    <!-- CARD: THÊM VÂN TAY MỚI -->
+                    <LinearLayout
+                        android:id="@+id/btnAddFp"
+                        android:layout_width="0dp"
+                        android:layout_height="90dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/card_luxury_gold_bg"
+                        android:orientation="vertical"
+                        android:gravity="center_vertical"
+                        android:padding="14dp"
+                        android:layout_marginEnd="6dp"
+                        android:clickable="true"
+                        android:focusable="true">
 
                         <ImageView
-                            android:layout_width="26dp"
-                            android:layout_height="26dp"
-                            android:layout_gravity="center"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
                             android:src="@drawable/ic_fingerprint"
                             app:tint="@color/gold_primary" />
-                    </FrameLayout>
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="14dp"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
 
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Cảm Biến Vân Tay R503"
+                            android:layout_marginTop="8dp"
+                            android:text="+ Thêm Ngón Tay"
                             android:textColor="@color/white"
-                            android:textSize="15sp"
+                            android:textSize="13sp"
                             android:textStyle="bold" />
 
                         <TextView
-                            android:id="@+id/tvFpSensorStatus"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="3dp"
-                            android:text="● SẴN SÀNG HOẠT ĐỘNG"
+                            android:text="Đa điểm 4 chạm"
                             android:textColor="@color/gold_primary"
-                            android:textSize="11sp"
+                            android:textSize="10sp"
+                            android:fontFamily="monospace" />
+                    </LinearLayout>
+
+                    <!-- CARD: CHỐNG NƯỚC MƯA -->
+                    <LinearLayout
+                        android:id="@+id/cardRainMode"
+                        android:layout_width="0dp"
+                        android:layout_height="90dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/card_cyber_bg"
+                        android:orientation="vertical"
+                        android:padding="12dp"
+                        android:layout_marginStart="6dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <ImageView
+                                android:id="@+id/ivRainIcon"
+                                android:layout_width="22dp"
+                                android:layout_height="22dp"
+                                android:src="@drawable/ic_rain"
+                                app:tint="@color/primary_blue" />
+
+                            <View
+                                android:layout_width="0dp"
+                                android:layout_height="0dp"
+                                android:layout_weight="1" />
+
+                            <ImageButton
+                                android:id="@+id/btnRainSettings"
+                                android:layout_width="28dp"
+                                android:layout_height="28dp"
+                                android:background="?attr/selectableItemBackgroundBorderless"
+                                android:src="@drawable/ic_settings"
+                                app:tint="@color/text_secondary"
+                                android:layout_marginEnd="4dp" />
+
+                            <androidx.appcompat.widget.SwitchCompat
+                                android:id="@+id/swRainQuick"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:text="Lọc Chống Mưa"
+                            android:textColor="@color/white"
+                            android:textSize="13sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tvRainStatusSubtitle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="ĐANG TẮT"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="10sp"
                             android:letterSpacing="0.04"
                             android:fontFamily="monospace" />
                     </LinearLayout>
                 </LinearLayout>
 
-                <!-- CARD CHẾ ĐỘ CHỐNG NƯỚC MƯA (ANTI-RAIN MODE) -->
+                <!-- ROW 2: Tinh chỉnh cảm biến & Nhật ký mở xe -->
                 <LinearLayout
-                    android:id="@+id/cardRainMode"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:background="@drawable/header_icon_btn_bg"
-                    android:gravity="center_vertical"
                     android:orientation="horizontal"
-                    android:padding="14dp"
-                    android:layout_marginBottom="14dp">
+                    android:layout_marginBottom="16dp">
+
+                    <!-- CARD: TINH CHỈNH ĐỘ NHẠY -->
+                    <LinearLayout
+                        android:id="@+id/btnFpSettings"
+                        android:layout_width="0dp"
+                        android:layout_height="75dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/card_cyber_bg"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:padding="12dp"
+                        android:layout_marginEnd="6dp"
+                        android:clickable="true"
+                        android:focusable="true">
+
+                        <FrameLayout
+                            android:layout_width="34dp"
+                            android:layout_height="34dp"
+                            android:background="@drawable/avatar_fp_bg">
+
+                            <ImageView
+                                android:layout_width="18dp"
+                                android:layout_height="18dp"
+                                android:layout_gravity="center"
+                                android:src="@drawable/ic_settings"
+                                app:tint="@color/gold_primary" />
+                        </FrameLayout>
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="10dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Độ Nhạy R503"
+                                android:textColor="@color/white"
+                                android:textSize="12sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Mức 1 - 5"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="10sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <!-- CARD: NHẬT KÝ MỞ XE -->
+                    <LinearLayout
+                        android:id="@+id/btnViewHistory"
+                        android:layout_width="0dp"
+                        android:layout_height="75dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/card_cyber_bg"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:padding="12dp"
+                        android:layout_marginStart="6dp"
+                        android:clickable="true"
+                        android:focusable="true">
+
+                        <FrameLayout
+                            android:layout_width="34dp"
+                            android:layout_height="34dp"
+                            android:background="@drawable/avatar_fp_bg">
+
+                            <ImageView
+                                android:layout_width="18dp"
+                                android:layout_height="18dp"
+                                android:layout_gravity="center"
+                                android:src="@drawable/ic_history"
+                                app:tint="@color/primary_blue" />
+                        </FrameLayout>
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="10dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Nhật Ký Quẹt"
+                                android:textColor="@color/white"
+                                android:textSize="12sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Xem lịch sử"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="10sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- ROW 3: CÀI ĐẶT ĐÈN VÒNG MÀU RGB R503 -->
+                <LinearLayout
+                    android:id="@+id/btnR503LedSettings"
+                    android:layout_width="match_parent"
+                    android:layout_height="75dp"
+                    android:background="@drawable/card_cyber_bg"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:padding="12dp"
+                    android:layout_marginBottom="16dp"
+                    android:clickable="true"
+                    android:focusable="true">
 
                     <FrameLayout
-                        android:layout_width="44dp"
-                        android:layout_height="44dp"
-                        android:background="@drawable/r503_gold_ring">
+                        android:layout_width="36dp"
+                        android:layout_height="36dp"
+                        android:background="@drawable/avatar_fp_bg">
 
                         <ImageView
-                            android:id="@+id/ivRainIcon"
-                            android:layout_width="22dp"
-                            android:layout_height="22dp"
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
                             android:layout_gravity="center"
-                            android:src="@drawable/ic_rain"
-                            app:tint="@color/gold_primary" />
+                            android:src="@drawable/ic_fingerprint"
+                            app:tint="#00F5D4" />
                     </FrameLayout>
 
                     <LinearLayout
@@ -827,86 +1208,30 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Chế Độ Chống Nước Mưa"
+                            android:text="Đèn Vòng Màu R503 (Aura RGB)"
                             android:textColor="@color/white"
-                            android:textSize="14sp"
+                            android:textSize="12sp"
                             android:textStyle="bold" />
 
                         <TextView
-                            android:id="@+id/tvRainStatusSubtitle"
+                            android:id="@+id/tvR503LedSummary"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="2dp"
-                            android:text="ĐANG TẮT"
+                            android:text="Bánh xe RGB 360° • Đổi màu 4 sự kiện"
                             android:textColor="@color/text_secondary"
-                            android:textSize="11sp"
-                            android:letterSpacing="0.02" />
+                            android:textSize="10sp" />
                     </LinearLayout>
 
-                    <!-- Nút Mở Cài Đặt Chi Tiết -->
-                    <ImageButton
-                        android:id="@+id/btnRainSettings"
-                        android:layout_width="38dp"
-                        android:layout_height="38dp"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:src="@drawable/ic_settings"
-                        app:tint="@color/gold_primary"
-                        android:layout_marginEnd="6dp" />
-
-                    <!-- Switch Bật / Tắt Nhanh -->
-                    <androidx.appcompat.widget.SwitchCompat
-                        android:id="@+id/swRainQuick"
+                    <TextView
                         android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" />
+                        android:layout_height="wrap_content"
+                        android:text="TÙY CHỈNH ❯"
+                        android:textColor="@color/gold_primary"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
                 </LinearLayout>
 
-                <!-- NÚT HERO LUXURY GOLD: THÊM VÂN TAY MỚI -->
-                <androidx.appcompat.widget.AppCompatButton
-                    android:id="@+id/btnAddFp"
-                    android:layout_width="match_parent"
-                    android:layout_height="52dp"
-                    android:layout_marginBottom="12dp"
-                    android:background="@drawable/btn_gold_hero"
-                    android:drawableStart="@drawable/ic_fingerprint"
-                    android:drawableTint="@color/black"
-                    android:paddingStart="20dp"
-                    android:text="+ Thêm Vân Tay Mới"
-                    android:textAllCaps="false"
-                    android:textColor="@color/black"
-                    android:textSize="15sp"
-                    android:textStyle="bold" />
-
-                <!-- NÚT PHỤ: TINH CHỈNH CẢM BIẾN VÂN TAY THỦ CÔNG -->
-                <androidx.appcompat.widget.AppCompatButton
-                    android:id="@+id/btnFpSettings"
-                    android:layout_width="match_parent"
-                    android:layout_height="44dp"
-                    android:layout_marginBottom="10dp"
-                    android:background="@drawable/header_icon_btn_bg"
-                    android:drawableStart="@drawable/ic_settings"
-                    android:drawableTint="@color/gold_primary"
-                    android:paddingStart="16dp"
-                    android:text="⚙️ Tinh Chỉnh Cảm Biến (Độ Nhạy &amp; Chế Độ)"
-                    android:textAllCaps="false"
-                    android:textColor="@color/white"
-                    android:textSize="13sp" />
-
-                <!-- NÚT PHỤ: XEM NHẬT KÝ MỞ KHÓA -->
-                <androidx.appcompat.widget.AppCompatButton
-                    android:id="@+id/btnViewHistory"
-                    android:layout_width="match_parent"
-                    android:layout_height="44dp"
-                    android:layout_marginBottom="18dp"
-                    android:background="@drawable/header_icon_btn_bg"
-                    android:drawableStart="@drawable/ic_history"
-                    android:drawableTint="@color/gold_primary"
-                    android:paddingStart="16dp"
-                    android:text="Nhật Ký Quẹt Vân Tay &amp; Mở Xe"
-                    android:textAllCaps="false"
-                    android:textColor="@color/white"
-                    android:textSize="13sp" />
-
-                <!-- HEADER DANH SÁCH VÂN TAY -->
+                <!-- 3. BIOMETRIC VAULT (DANH SÁCH VÂN TAY) -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -957,7 +1282,7 @@
                     android:layout_height="wrap_content"
                     android:gravity="center"
                     android:paddingVertical="32dp"
-                    android:text="Chưa có vân tay nào.\nNhấn '+ Thêm vân tay mới' để đăng ký."
+                    android:text="Chưa có vân tay nào.\nNhấn '+ Thêm Ngón Tay' để đăng ký."
                     android:textColor="@color/text_secondary"
                     android:textSize="13sp" />
 

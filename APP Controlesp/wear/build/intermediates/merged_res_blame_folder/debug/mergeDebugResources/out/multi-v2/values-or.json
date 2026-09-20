@@ -4,24 +4,7 @@
             "outputFile": "com.example.control_esp.wear-mergeDebugResources-37:/values-or/values-or.xml",
             "map": [
                 {
-                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.5.0\\transforms\\10ad62b3704653069e5b34ade80b3147\\transformed\\foundation-release\\res\\values-or\\values-or.xml",
-                    "from": {
-                        "startLines": "2,3,4",
-                        "startColumns": "4,4,4",
-                        "startOffsets": "55,128,213",
-                        "endColumns": "72,84,87",
-                        "endOffsets": "123,208,296"
-                    },
-                    "to": {
-                        "startLines": "2,48,49",
-                        "startColumns": "4,4,4",
-                        "startOffsets": "105,4917,5002",
-                        "endColumns": "72,84,87",
-                        "endOffsets": "173,4997,5085"
-                    }
-                },
-                {
-                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.5.0\\transforms\\0cf5456e6ec95ee2b51ff1f908a825b4\\transformed\\play-services-base-18.5.0\\res\\values-or\\values.xml",
+                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.6.0\\transforms\\4ec2f659b63804c5ba68acb74f4003df\\transformed\\play-services-base-18.5.0\\res\\values-or\\values.xml",
                     "from": {
                         "startLines": "4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20",
                         "startColumns": "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
@@ -38,7 +21,41 @@
                     }
                 },
                 {
-                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.5.0\\transforms\\3a804a2aa226e174b2dc0c5a1623aed3\\transformed\\play-services-basement-18.9.0\\res\\values-or\\values.xml",
+                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.6.0\\transforms\\3ebbee1068c6b6aee81f0377ca29bbe6\\transformed\\foundation-release\\res\\values-or\\values-or.xml",
+                    "from": {
+                        "startLines": "2,3,4",
+                        "startColumns": "4,4,4",
+                        "startOffsets": "55,128,213",
+                        "endColumns": "72,84,87",
+                        "endOffsets": "123,208,296"
+                    },
+                    "to": {
+                        "startLines": "2,48,49",
+                        "startColumns": "4,4,4",
+                        "startOffsets": "105,4917,5002",
+                        "endColumns": "72,84,87",
+                        "endOffsets": "173,4997,5085"
+                    }
+                },
+                {
+                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.6.0\\transforms\\fe778710c89dd29db76fea357e5b77f1\\transformed\\ui-release\\res\\values-or\\values-or.xml",
+                    "from": {
+                        "startLines": "3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21",
+                        "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4",
+                        "startOffsets": "179,276,363,455,555,641,718,816,904,991,1069,1151,1221,1305,1380,1457,1533,1616,1683",
+                        "endColumns": "96,86,91,99,85,76,97,87,86,77,81,69,83,74,76,75,82,66,118",
+                        "endOffsets": "271,358,450,550,636,713,811,899,986,1064,1146,1216,1300,1375,1452,1528,1611,1678,1797"
+                    },
+                    "to": {
+                        "startLines": "10,11,30,31,32,33,34,35,36,37,38,39,40,41,42,43,45,46,47",
+                        "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4",
+                        "startOffsets": "913,1010,3377,3469,3569,3655,3732,3830,3918,4005,4083,4165,4235,4319,4394,4471,4648,4731,4798",
+                        "endColumns": "96,86,91,99,85,76,97,87,86,77,81,69,83,74,76,75,82,66,118",
+                        "endOffsets": "1005,1092,3464,3564,3650,3727,3825,3913,4000,4078,4160,4230,4314,4389,4466,4542,4726,4793,4912"
+                    }
+                },
+                {
+                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.6.0\\transforms\\6fa7aa0c2fddba23fcc2509ebd9a8209\\transformed\\play-services-basement-18.9.0\\res\\values-or\\values.xml",
                     "from": {
                         "startLines": "4",
                         "startColumns": "0",
@@ -55,7 +72,7 @@
                     }
                 },
                 {
-                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.5.0\\transforms\\8bffcc8846e2d6bea6d5d4ac0c134303\\transformed\\core-1.16.0\\res\\values-or\\values-or.xml",
+                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.6.0\\transforms\\5a664a2f2ff07975368ee07c298a6338\\transformed\\core-1.16.0\\res\\values-or\\values-or.xml",
                     "from": {
                         "startLines": "2,3,4,5,6,7,8,9",
                         "startColumns": "4,4,4,4,4,4,4,4",
@@ -69,23 +86,6 @@
                         "startOffsets": "178,281,383,486,591,692,794,4547",
                         "endColumns": "102,101,102,104,100,101,118,100",
                         "endOffsets": "276,378,481,586,687,789,908,4643"
-                    }
-                },
-                {
-                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.5.0\\transforms\\82fcf2a5dc806172a78f479eafdac75b\\transformed\\ui-release\\res\\values-or\\values-or.xml",
-                    "from": {
-                        "startLines": "3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21",
-                        "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4",
-                        "startOffsets": "179,276,363,455,555,641,718,816,904,991,1069,1151,1221,1305,1380,1457,1533,1616,1683",
-                        "endColumns": "96,86,91,99,85,76,97,87,86,77,81,69,83,74,76,75,82,66,118",
-                        "endOffsets": "271,358,450,550,636,713,811,899,986,1064,1146,1216,1300,1375,1452,1528,1611,1678,1797"
-                    },
-                    "to": {
-                        "startLines": "10,11,30,31,32,33,34,35,36,37,38,39,40,41,42,43,45,46,47",
-                        "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4",
-                        "startOffsets": "913,1010,3377,3469,3569,3655,3732,3830,3918,4005,4083,4165,4235,4319,4394,4471,4648,4731,4798",
-                        "endColumns": "96,86,91,99,85,76,97,87,86,77,81,69,83,74,76,75,82,66,118",
-                        "endOffsets": "1005,1092,3464,3564,3650,3727,3825,3913,4000,4078,4160,4230,4314,4389,4466,4542,4726,4793,4912"
                     }
                 }
             ]

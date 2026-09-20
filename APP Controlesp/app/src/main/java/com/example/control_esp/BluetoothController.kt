@@ -55,20 +55,33 @@ object BluetoothController {
     private fun startListening() {
         listenerThread = Thread {
             val buffer = ByteArray(1024)
+            val streamBuffer = StringBuilder()
             while (isConnected) {
                 try {
                     val bytes = inputStream?.read(buffer) ?: -1
                     if (bytes > 0) {
-                        val message = String(buffer, 0, bytes).trim()
-                        Log.d("BT_CONTROLLER", "Raw Feedback: $message")
-                        
-                        // Xử lý nếu tin nhắn bắt đầu bằng FB|
-                        if (message.contains("FB|")) {
-                            val parts = message.split("FB|")
-                            if (parts.size > 1) {
-                                val status = parts[1].trim()
-                                onMessageReceived?.invoke(status)
+                        val incomingStr = String(buffer, 0, bytes, Charsets.UTF_8)
+                        streamBuffer.append(incomingStr)
+
+                        if (streamBuffer.length > 16384) {
+                            val lastFb = streamBuffer.lastIndexOf("FB|")
+                            if (lastFb >= 0) streamBuffer.delete(0, lastFb) else streamBuffer.setLength(0)
+                        }
+
+                        var newlineIdx = streamBuffer.indexOf("\n")
+                        while (newlineIdx != -1) {
+                            val line = streamBuffer.substring(0, newlineIdx).trim()
+                            streamBuffer.delete(0, newlineIdx + 1)
+                            if (line.contains("FB|")) {
+                                val parts = line.split("FB|")
+                                for (i in 1 until parts.size) {
+                                    val status = parts[i].trim()
+                                    if (status.isNotEmpty()) {
+                                        onMessageReceived?.invoke(status)
+                                    }
+                                }
                             }
+                            newlineIdx = streamBuffer.indexOf("\n")
                         }
                     }
                 } catch (e: Exception) {

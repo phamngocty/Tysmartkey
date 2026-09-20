@@ -143,6 +143,7 @@ object BleManager {
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                     Log.i(TAG, "Disconnected from GATT server (status=$status).")
                     gattMap.remove(gatt.device.address)
+                    incomingBuffer.setLength(0)
                     try {
                         gatt.disconnect()
                         gatt.close()
@@ -220,22 +221,46 @@ object BleManager {
         device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
     }
 
+    private val incomingBuffer = StringBuilder()
+
+    @Synchronized
     private fun handleIncomingBytes(bytes: ByteArray) {
-        val rawMessage = String(bytes)
-        Log.d(TAG, "Raw BLE Notification: $rawMessage")
-        
-        val lines = rawMessage.split("\n", "\r")
-        for (line in lines) {
-            val trimmed = line.trim()
-            if (trimmed.contains("FB|")) {
-                val parts = trimmed.split("FB|")
-                for (i in 1 until parts.size) {
-                    val status = parts[i].trim()
+        val incomingStr = String(bytes, Charsets.UTF_8)
+        incomingBuffer.append(incomingStr)
+
+        // Phòng chống tràn bộ đệm khi dữ liệu rác không có ký tự ngắt dòng \n
+        if (incomingBuffer.length > 16384) {
+            val lastFbIdx = incomingBuffer.lastIndexOf("FB|")
+            if (lastFbIdx >= 0) {
+                incomingBuffer.delete(0, lastFbIdx)
+            } else {
+                incomingBuffer.setLength(0)
+            }
+        }
+
+        var newlineIdx = incomingBuffer.indexOf("\n")
+        while (newlineIdx != -1) {
+            val completeLine = incomingBuffer.substring(0, newlineIdx).trim()
+            incomingBuffer.delete(0, newlineIdx + 1)
+
+            if (completeLine.isNotEmpty()) {
+                val fbIdx = completeLine.indexOf("FB|")
+                if (fbIdx != -1) {
+                    val status = completeLine.substring(fbIdx + 3).trim()
                     if (status.isNotEmpty()) {
-                        onMessageReceived?.invoke(status)
+                        if (status.contains("FB|")) {
+                            val parts = completeLine.split("FB|")
+                            for (i in 1 until parts.size) {
+                                val s = parts[i].trim()
+                                if (s.isNotEmpty()) onMessageReceived?.invoke(s)
+                            }
+                        } else {
+                            onMessageReceived?.invoke(status)
+                        }
                     }
                 }
             }
+            newlineIdx = incomingBuffer.indexOf("\n")
         }
     }
 
@@ -252,6 +277,7 @@ object BleManager {
             }
         }
         if (macAddress == activeMac) {
+            incomingBuffer.setLength(0)
             onConnectionStateChanged?.invoke(false)
         }
     }

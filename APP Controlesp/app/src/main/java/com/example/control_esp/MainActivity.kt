@@ -13,20 +13,31 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
 import android.view.animation.AlphaAnimation
 import android.view.animation.Animation
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Typeface
 import android.util.Base64
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.AppCompatButton
 import androidx.appcompat.widget.SwitchCompat
 import androidx.cardview.widget.CardView
+import android.content.res.ColorStateList
 import androidx.core.content.ContextCompat
+import androidx.core.widget.ImageViewCompat
 import com.google.android.gms.wearable.*
 import com.google.android.material.bottomnavigation.BottomNavigationView
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.text.SimpleDateFormat
 import java.util.*
 
 data class FingerprintItem(val id: Int, var name: String)
@@ -133,6 +144,39 @@ class MainActivity : AppCompatActivity() {
     private var rgFpEnrollModeRef: RadioGroup? = null
     private var rbEnroll4TouchRef: RadioButton? = null
     private var rbEnroll2TouchRef: RadioButton? = null
+
+    // Hiển thị ảnh quang học R503 trực tiếp trên Tab Vân tay
+    private var ivTabFingerprintImageRef: ImageView? = null
+    private var pbTabImageProgressRef: ProgressBar? = null
+    private var tvTabImageStatusRef: TextView? = null
+    private var tvTabImageDescRef: TextView? = null
+    private var btnCaptureLiveImageRef: AppCompatButton? = null
+    private var isCapturingLiveImage = false
+
+    // Hiển thị ảnh vân tay và trạng thái test trong dialog tinh chỉnh
+    private var ivFpTestImageRef: ImageView? = null
+    private var pbFpTestImageProgressRef: ProgressBar? = null
+    private var tvFpTestIdBadgeRef: TextView? = null
+    private var tvFpTestImageInfoRef: TextView? = null
+
+    // Quản lý Cấu hình Đèn Vòng Màu R503 (Aura RGB)
+    data class LedEventState(var mode: Int, var color: Int, var speed: Int)
+    private var ledUnlocked = LedEventState(1, 2, 120) // Breathing Blue
+    private var ledLocked   = LedEventState(4, 2, 0)   // Always OFF
+    private var ledSuccess  = LedEventState(2, 2, 40)  // Flashing Blue
+    private var ledError    = LedEventState(2, 1, 30)  // Flashing Red
+    private var ledConfigDialog: AlertDialog? = null
+    private var currentLedTab = 0 // 0: Unlocked, 1: Locked, 2: Success, 3: Error
+    private var rgbColorWheelRef: RgbColorWheelView? = null
+    private var tvSelectedColorDisplayRef: TextView? = null
+    private var rgEffectModeRef: RadioGroup? = null
+    private var sbEffectSpeedRef: SeekBar? = null
+    private var tvSpeedValueRef: TextView? = null
+    private var tvCurrentEditingBadgeRef: TextView? = null
+    private var btnTabUnlockedRef: Button? = null
+    private var btnTabLockedRef: Button? = null
+    private var btnTabSuccessRef: Button? = null
+    private var btnTabErrorRef: Button? = null
 
 
     // Quản lý tự động kết nối lại khi xe lại gần
@@ -259,10 +303,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Các nút trong tab vân tay & cài đặt mới
-        val btnAddFp = findViewById<Button>(R.id.btnAddFp)
-        val btnRefreshFp = findViewById<Button>(R.id.btnRefreshFp)
-        val btnClearAllFp = findViewById<Button>(R.id.btnClearAllFp)
-        val btnViewHistory = findViewById<Button>(R.id.btnViewHistory)
+        val btnAddFp = findViewById<View>(R.id.btnAddFp)
+        val btnRefreshFp = findViewById<View>(R.id.btnRefreshFp)
+        val btnClearAllFp = findViewById<View>(R.id.btnClearAllFp)
+        val btnViewHistory = findViewById<View>(R.id.btnViewHistory)
         val btnScanBle = findViewById<Button>(R.id.btnScanBle)
         val btnChangeKey = findViewById<Button>(R.id.btnChangeKey)
 
@@ -289,6 +333,91 @@ class MainActivity : AppCompatActivity() {
 
         cardRainMode?.setOnClickListener {
             showRainSettingsDialog()
+        }
+
+        // Card Ảnh Vân Tay Quang Học R503 trên Tab Vân tay
+        val ivTabFpImg = findViewById<ImageView?>(R.id.ivTabFingerprintImage)
+        val pbTabFpProg = findViewById<ProgressBar?>(R.id.pbTabImageProgress)
+        val tvTabFpStatus = findViewById<TextView?>(R.id.tvTabImageStatus)
+        val tvTabFpDesc = findViewById<TextView?>(R.id.tvTabImageDesc)
+        val btnCaptureLive = findViewById<AppCompatButton?>(R.id.btnCaptureLiveImage)
+
+        ivTabFingerprintImageRef = ivTabFpImg
+        pbTabImageProgressRef = pbTabFpProg
+        tvTabImageStatusRef = tvTabFpStatus
+        tvTabImageDescRef = tvTabFpDesc
+        btnCaptureLiveImageRef = btnCaptureLive
+
+        loadCachedFingerprintImage()
+
+        val flRing = findViewById<View?>(R.id.flScannerRing)
+        val onImageClick = View.OnClickListener {
+            val file = File(cacheDir, "last_r503_scan.png")
+            if (file.exists()) {
+                val cachedBmp = BitmapFactory.decodeFile(file.absolutePath)
+                if (cachedBmp != null) {
+                    showFingerprintImageZoomDialog(cachedBmp)
+                    return@OnClickListener
+                }
+            }
+            if (lastRawFingerprintBytes != null) {
+                val bmp = decodeR503ImageToBitmap(lastRawFingerprintBytes!!, 192, 192, isOpticalInvertMode)
+                if (bmp != null) {
+                    showFingerprintImageZoomDialog(bmp)
+                    return@OnClickListener
+                }
+            }
+            Toast.makeText(this, "Chưa có ảnh quét thực tế. Bấm 'Chụp Lăng Kính' để chụp!", Toast.LENGTH_SHORT).show()
+        }
+        ivTabFpImg?.setOnClickListener(onImageClick)
+        flRing?.setOnClickListener(onImageClick)
+
+        btnCaptureLive?.setOnClickListener {
+            if (!isConnectedToVehicle()) {
+                Toast.makeText(this, "Vui lòng kết nối xe trước khi chụp ảnh!", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            if (isCapturingLiveImage) {
+                Toast.makeText(this, "Đang trong tiến trình chụp ảnh...", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            startLiveFingerprintCapture()
+        }
+
+        val btnLiveTestQuick = findViewById<View?>(R.id.btnLiveTestQuick)
+        btnLiveTestQuick?.setOnClickListener {
+            if (!isConnectedToVehicle()) {
+                Toast.makeText(this, "Vui lòng kết nối xe trước khi quét thử!", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            sendVehicleCommand("TEST_FP|15")
+            Toast.makeText(this, "Đã kích hoạt quét thử đọc mã vân tay (15s). Hãy chạm R503!", Toast.LENGTH_SHORT).show()
+            tvFpSensorStatus?.text = "🔍 Đang quét thử đọc mã (15s)... Hãy chạm ngón tay vào R503"
+            tvFpSensorStatus?.setTextColor(ContextCompat.getColor(this, R.color.gold_primary))
+        }
+
+        // 3. Công tắc bật/tắt nhanh chế độ truyền ảnh quang học BLE (tiết kiệm băng thông & vi xử lý)
+        val swTabImageMode = findViewById<SwitchCompat?>(R.id.swTabImageMode)
+        val tvTabImageModeSub = findViewById<TextView?>(R.id.tvTabImageModeSubtitle)
+        val btnToggleImageMode = findViewById<View?>(R.id.btnToggleImageMode)
+
+        val isImgModeOn = getSharedPreferences("BT_PREF", MODE_PRIVATE).getBoolean("FP_SEND_IMG", false)
+        swTabImageMode?.isChecked = isImgModeOn
+        tvTabImageModeSub?.text = if (isImgModeOn) "🟢 Đang BẬT: Truyền ảnh quang học (Đầy đủ trực quan)" else "⚪ Đang TẮT: Quẹt xe siêu tốc, tiết kiệm băng thông & CPU"
+
+        swTabImageMode?.setOnCheckedChangeListener { _, isChecked ->
+            fpSendImageVal = isChecked
+            getSharedPreferences("BT_PREF", MODE_PRIVATE).edit().putBoolean("FP_SEND_IMG", isChecked).apply()
+            swFpSendImageRef?.isChecked = isChecked
+            tvTabImageModeSub?.text = if (isChecked) "🟢 Đang BẬT: Truyền ảnh quang học (Đầy đủ trực quan)" else "⚪ Đang TẮT: Quẹt xe siêu tốc, tiết kiệm băng thông & CPU"
+            if (isConnectedToVehicle()) {
+                sendVehicleCommand("SET_FP_IMG_MODE|" + if (isChecked) "1" else "0")
+            }
+            Toast.makeText(this, if (isChecked) "Đã BẬT nhận ảnh vân tay!" else "Đã TẮT nhận ảnh (Tiết kiệm băng thông & CPU)!", Toast.LENGTH_SHORT).show()
+        }
+
+        btnToggleImageMode?.setOnClickListener {
+            swTabImageMode?.toggle()
         }
 
 
@@ -507,9 +636,14 @@ class MainActivity : AppCompatActivity() {
                 .show()
         }
 
-        val btnFpSettings = findViewById<Button>(R.id.btnFpSettings)
+        val btnFpSettings = findViewById<View>(R.id.btnFpSettings)
         btnFpSettings?.setOnClickListener {
             showFingerprintSettingsDialog()
+        }
+
+        val btnR503LedSettings = findViewById<View>(R.id.btnR503LedSettings)
+        btnR503LedSettings?.setOnClickListener {
+            showR503LedSettingsDialog()
         }
 
         // Đồng bộ dữ liệu từ đồng hồ Wear OS
@@ -631,6 +765,94 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleVehicleFeedback(status: String) {
+        // 1. Nhận chunk Base64 ngầm: gom buffer trong background thread, KHÔNG đè Main UI Thread!
+        if (status.startsWith("FP_IMG_CHUNK|")) {
+            val chunk = status.substringAfter("FP_IMG_CHUNK|").trim()
+            if (chunk.isNotEmpty()) {
+                synchronized(enrollImageBuffer) {
+                    enrollImageBuffer.append(chunk)
+                }
+            }
+            return
+        }
+
+        // 2. Kết thúc nhận ảnh: Giải mã Base64 và xử lý Bitmap trong Thread riêng, giải phóng Main UI Thread
+        if (status == "FP_IMG_END") {
+            Thread {
+                val fullB64: String
+                synchronized(enrollImageBuffer) {
+                    fullB64 = enrollImageBuffer.toString()
+                    enrollImageBuffer.setLength(0)
+                }
+
+                var decodedBmp: Bitmap? = null
+                if (fullB64.isNotEmpty()) {
+                    try {
+                        decodedBmp = safeDecodeR503Base64ToBitmap(fullB64, 192, 192)
+                        if (decodedBmp != null) {
+                            saveCachedFingerprintImage(decodedBmp)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("FP_IMG", "Decode image error in background", e)
+                    }
+                }
+
+                val bmp = decodedBmp
+                runOnUiThread {
+                    pbTabImageProgressRef?.visibility = View.GONE
+                    pbFpTestImageProgressRef?.visibility = View.GONE
+                    isCapturingLiveImage = false
+                    if (bmp != null) {
+                        val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+
+                        // 1. Hiển thị trong dialog thêm vân tay (nếu đang mở)
+                        ivEnrollFingerprintImageRef?.let {
+                            ImageViewCompat.setImageTintList(it, null)
+                            it.imageTintList = null
+                            it.colorFilter = null
+                            it.setImageBitmap(bmp)
+                        }
+                        cvEnrollImageCardRef?.visibility = View.VISIBLE
+                        val anim = AlphaAnimation(0.2f, 1f).apply { duration = 350 }
+                        cvEnrollImageCardRef?.startAnimation(anim)
+                        tvEnrollStepDescRef?.text = "📸 Đã nhận ảnh vân tay thành công!"
+
+                        // 2. Cập nhật trực tiếp lên Card Ảnh ở Tab Vân tay
+                        ivTabFingerprintImageRef?.let {
+                            ImageViewCompat.setImageTintList(it, null)
+                            it.imageTintList = null
+                            it.colorFilter = null
+                            it.setImageBitmap(bmp)
+                        }
+                        tvTabImageStatusRef?.text = "✅ Chụp ảnh quang học thành công"
+                        tvTabImageDescRef?.text = "Độ phân giải 508 DPI • Đã nhận lúc $timeStr"
+
+                        // 3. Cập nhật trực tiếp lên Card Ảnh trong Dialog Tinh chỉnh & Test (nếu đang mở)
+                        ivFpTestImageRef?.let {
+                            ImageViewCompat.setImageTintList(it, null)
+                            it.imageTintList = null
+                            it.colorFilter = null
+                            it.setImageBitmap(bmp)
+                        }
+                        tvFpTestImageInfoRef?.text = "Ảnh quang học 192x192 (508 DPI) • $timeStr"
+                        if (tvFpTestStatusRef?.text?.contains("Đang nhận ảnh") == true) {
+                            val currentText = tvFpTestStatusRef?.text.toString().replace("• Đang nhận ảnh quang học từ cảm biến...", "")
+                            tvFpTestStatusRef?.text = "$currentText\n📸 Đã hiển thị ảnh lăng kính ($timeStr)"
+                        } else {
+                            tvFpTestStatusRef?.text = "📸 Đã chụp ảnh lăng kính thành công lúc $timeStr"
+                        }
+
+                        triggerHapticFeedback()
+                    } else {
+                        tvTabImageStatusRef?.text = "⚠️ Không thể giải mã ảnh"
+                        tvTabImageDescRef?.text = "Dữ liệu ảnh BLE rỗng hoặc không đúng định dạng."
+                        tvFpTestStatusRef?.text = "⚠️ Lỗi giải mã ảnh vân tay!"
+                    }
+                }
+            }.start()
+            return
+        }
+
         runOnUiThread {
             when {
                 status == "DA_MO_KHOA" -> {
@@ -781,35 +1003,47 @@ class MainActivity : AppCompatActivity() {
                     // Fallback
                 }
                 status.startsWith("FP_IMG_START") -> {
-                    enrollImageBuffer.setLength(0)
+                    synchronized(enrollImageBuffer) {
+                        enrollImageBuffer.setLength(0)
+                    }
                     tvEnrollStepDescRef?.text = "📸 Đang truyền ảnh vân tay từ cảm biến..."
+                    pbTabImageProgressRef?.visibility = View.VISIBLE
+                    tvTabImageStatusRef?.text = "📸 Đang nhận dữ liệu ảnh..."
+                    tvTabImageDescRef?.text = "Đang truyền các gói tin quang học qua Bluetooth..."
+                    pbFpTestImageProgressRef?.visibility = View.VISIBLE
+                    tvFpTestIdBadgeRef?.text = "NHẬN ẢNH"
+                    tvFpTestStatusRef?.text = "📸 Đang truyền dữ liệu ảnh từ lăng kính quang học R503..."
                 }
-                status.startsWith("FP_IMG_CHUNK|") -> {
-                    val chunk = status.substringAfter("FP_IMG_CHUNK|").trim()
-                    if (chunk.isNotEmpty()) {
-                        enrollImageBuffer.append(chunk)
-                    }
+                status == "FP_CAPTURE_WAIT" -> {
+                    pbTabImageProgressRef?.visibility = View.VISIBLE
+                    tvTabImageStatusRef?.text = "📸 Chờ chạm ngón tay..."
+                    tvTabImageDescRef?.text = "Đèn cảm biến đang sáng tím. Hãy áp ngón tay và giữ êm."
+                    pbFpTestImageProgressRef?.visibility = View.VISIBLE
+                    tvFpTestIdBadgeRef?.text = "CHẠM R503"
+                    tvFpTestIdBadgeRef?.setTextColor(ContextCompat.getColor(this, R.color.gold_primary))
+                    tvFpTestStatusRef?.text = "📸 Đèn cảm biến đang sáng tím. Hãy áp ngón tay và giữ êm trên R503..."
                 }
-                status == "FP_IMG_END" -> {
-                    val fullB64 = enrollImageBuffer.toString()
-                    enrollImageBuffer.setLength(0)
-                    if (fullB64.isNotEmpty()) {
-                        try {
-                            val rawBytes = Base64.decode(fullB64, Base64.DEFAULT)
-                            val bmp = decodeR503ImageToBitmap(rawBytes, 192, 192)
-                            if (bmp != null) {
-                                ivEnrollFingerprintImageRef?.setImageBitmap(bmp)
-                                cvEnrollImageCardRef?.visibility = View.VISIBLE
-                                val anim = AlphaAnimation(0.2f, 1f).apply {
-                                    duration = 350
-                                }
-                                cvEnrollImageCardRef?.startAnimation(anim)
-                                tvEnrollStepDescRef?.text = "📸 Đã nhận ảnh vân tay thành công!"
-                            }
-                        } catch (e: Exception) {
-                            Log.e("FP_IMG", "Decode image error", e)
-                        }
-                    }
+                status == "FP_CAPTURE_TIMEOUT" -> {
+                    pbTabImageProgressRef?.visibility = View.GONE
+                    pbFpTestImageProgressRef?.visibility = View.GONE
+                    isCapturingLiveImage = false
+                    tvTabImageStatusRef?.text = "⏱️ Hết thời gian chờ"
+                    tvTabImageDescRef?.text = "Không phát hiện ngón tay chạm cảm biến R503."
+                    tvFpTestIdBadgeRef?.text = "HẾT GIỜ"
+                    tvFpTestIdBadgeRef?.setTextColor(ContextCompat.getColor(this, R.color.accent_amber))
+                    tvFpTestStatusRef?.text = "⏱️ Hết thời gian chờ chạm ngón tay!"
+                    Toast.makeText(this, "Hết thời gian chờ chạm ngón tay!", Toast.LENGTH_SHORT).show()
+                }
+                status == "FP_IMG_ERR" -> {
+                    pbTabImageProgressRef?.visibility = View.GONE
+                    pbFpTestImageProgressRef?.visibility = View.GONE
+                    isCapturingLiveImage = false
+                    tvTabImageStatusRef?.text = "❌ Lỗi đọc ảnh R503"
+                    tvTabImageDescRef?.text = "Cảm biến từ chối lệnh trích xuất ảnh hoặc mất kết nối."
+                    tvFpTestIdBadgeRef?.text = "LỖI ĐỌC"
+                    tvFpTestIdBadgeRef?.setTextColor(ContextCompat.getColor(this, R.color.accent_danger))
+                    tvFpTestStatusRef?.text = "❌ Cảm biến R503 báo lỗi trích xuất ảnh!"
+                    Toast.makeText(this, "Cảm biến R503 báo lỗi trích xuất ảnh!", Toast.LENGTH_SHORT).show()
                 }
                 status == "FP_ENROLL_LIFT_FIRST" -> {
                     tvEnrollStepDescRef?.text = "⚠️ Phát hiện ngón tay đặt sẵn!\nVui lòng nhấc ngón tay ra khỏi cảm biến để bắt đầu."
@@ -994,25 +1228,69 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this, "Đã lưu cấu hình tinh chỉnh vân tay thành công!", Toast.LENGTH_SHORT).show()
                     fpSettingsDialog?.dismiss()
                 }
+
+                // --- CẤU HÌNH ĐÈN VÒNG MÀU R503 (AURA RGB) ---
+                status.startsWith("LED_CFG|") -> {
+                    val parts = status.split("|")
+                    if (parts.size >= 13) {
+                        ledUnlocked = LedEventState(parts[1].toIntOrNull() ?: 1, parts[2].toIntOrNull() ?: 2, parts[3].toIntOrNull() ?: 120)
+                        ledLocked   = LedEventState(parts[4].toIntOrNull() ?: 4, parts[5].toIntOrNull() ?: 2, parts[6].toIntOrNull() ?: 0)
+                        ledSuccess  = LedEventState(parts[7].toIntOrNull() ?: 2, parts[8].toIntOrNull() ?: 2, parts[9].toIntOrNull() ?: 40)
+                        ledError    = LedEventState(parts[10].toIntOrNull() ?: 2, parts[11].toIntOrNull() ?: 1, parts[12].toIntOrNull() ?: 30)
+                        updateLedConfigDialogUI()
+                    }
+                }
+                status == "LED_CFG_OK" -> {
+                    Toast.makeText(this, "💾 Đã lưu cấu hình đèn LED R503 thành công!", Toast.LENGTH_SHORT).show()
+                    ledConfigDialog?.dismiss()
+                }
+                status == "LED_TEST_OK" -> {
+                    Toast.makeText(this, "⚡ Cảm biến R503 đang sáng thử màu đã chọn!", Toast.LENGTH_SHORT).show()
+                }
+                status.startsWith("FP_IMG_MODE|") -> {
+                    val modeOn = status.substringAfter("FP_IMG_MODE|").trim() == "1"
+                    fpSendImageVal = modeOn
+                    getSharedPreferences("BT_PREF", MODE_PRIVATE).edit().putBoolean("FP_SEND_IMG", modeOn).apply()
+                    swFpSendImageRef?.isChecked = modeOn
+                    findViewById<SwitchCompat?>(R.id.swTabImageMode)?.isChecked = modeOn
+                    findViewById<TextView?>(R.id.tvTabImageModeSubtitle)?.text = if (modeOn) "🟢 Đang BẬT: Truyền ảnh quang học (Đầy đủ trực quan)" else "⚪ Đang TẮT: Quẹt xe siêu tốc, tiết kiệm băng thông & CPU"
+                }
                 status.startsWith("FP_TEST_STARTED|") -> {
                     val dur = status.substringAfter("FP_TEST_STARTED|").trim()
                     tvFpTestStatusRef?.text = "⏳ Đang quét thử nghiệm (còn ${dur}s)...\nHãy đặt ngón tay lên cảm biến R503 ngay!"
                     tvFpTestStatusRef?.setTextColor(ContextCompat.getColor(this, R.color.gold_primary))
+                    tvFpTestIdBadgeRef?.text = "QUẸT THỬ (${dur}s)"
+                    tvFpTestIdBadgeRef?.setTextColor(ContextCompat.getColor(this, R.color.gold_primary))
+                    pbFpTestImageProgressRef?.visibility = View.VISIBLE
+                    tvFpSensorStatus?.text = "🔬 Đang ở chế độ quẹt thử (còn ${dur}s)... Chạm R503"
+                    tvFpSensorStatus?.setTextColor(ContextCompat.getColor(this, R.color.gold_primary))
                 }
                 status.startsWith("FP_TEST_RESULT|") -> {
-                    // FP_TEST_RESULT|<id>|<name>|<confidence>
+                    // FP_TEST_RESULT|<id>|<name>|<confidence>[|<fpCode>]
                     val parts = status.split("|")
                     if (parts.size >= 4) {
                         val id = parts[1].toIntOrNull() ?: -1
                         val name = parts[2]
                         val conf = parts[3]
+                        val fpCode = if (parts.size >= 5 && parts[4].isNotEmpty()) parts[4] else (if (id > 0) "FP-ID${String.format("%02d", id)}" else "FP-ACTIVE")
+                        val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+
+                        // Huy hiệu hiển thị trực tiếp MÃ VÂN TAY
+                        tvFpTestIdBadgeRef?.text = "MÃ: $fpCode"
+                        tvFpTestIdBadgeRef?.setTextColor(ContextCompat.getColor(this, R.color.gold_primary))
+
                         if (id > 0) {
-                            tvFpTestStatusRef?.text = "✅ KHỚP VÂN TAY!\n• ID: #$id ($name)\n• Độ tin cậy (Confidence): $conf\n(Mở khóa xe hoàn hảo)"
-                            tvFpTestStatusRef?.setTextColor(ContextCompat.getColor(this, R.color.accent_emerald))
+                            tvFpTestStatusRef?.text = "🔑 MÃ VÂN TAY: $fpCode\n🟢 Cảm biến R503 đọc thành công!\n• Đối chiếu xe: Khớp $name (ID #$id) - Điểm: $conf/255\n• Thời gian nhận diện: $timeStr"
+                            tvFpTestStatusRef?.setTextColor(ContextCompat.getColor(this, R.color.white))
+                            tvFpSensorStatus?.text = "🔑 Mã: $fpCode • Khớp $name (#$id)"
+                            tvFpSensorStatus?.setTextColor(ContextCompat.getColor(this, R.color.gold_primary))
                         } else {
-                            tvFpTestStatusRef?.text = "❌ KHÔNG KHỚP MẪU NÀO!\n(Vân tay chưa đăng ký hoặc thử giảm Mức bảo mật xuống Mức 2)"
-                            tvFpTestStatusRef?.setTextColor(ContextCompat.getColor(this, R.color.accent_danger))
+                            tvFpTestStatusRef?.text = "🔑 MÃ VÂN TAY: $fpCode\n🟢 Cảm biến R503 đã đọc & trích xuất thành công mã vân tay!\n• Trạng thái: Ngón tay mới (Chưa lưu trong chìa khóa xe)\n• Thời gian nhận diện: $timeStr"
+                            tvFpTestStatusRef?.setTextColor(ContextCompat.getColor(this, R.color.white))
+                            tvFpSensorStatus?.text = "🔑 Đã đọc mã vân tay: $fpCode"
+                            tvFpSensorStatus?.setTextColor(ContextCompat.getColor(this, R.color.primary_blue))
                         }
+                        triggerHapticFeedback()
                     }
                 }
 
@@ -1477,7 +1755,12 @@ class MainActivity : AppCompatActivity() {
         val rb2Touch = dialogView.findViewById<RadioButton>(R.id.rbEnroll2Touch)
         val swSendImage = dialogView.findViewById<SwitchCompat>(R.id.swFpSendImage)
         val btnLiveTest = dialogView.findViewById<Button>(R.id.btnFpLiveTest)
+        val btnFpTestCaptureImg = dialogView.findViewById<Button>(R.id.btnFpTestCaptureImg)
         val tvTestStatus = dialogView.findViewById<TextView>(R.id.tvFpTestStatus)
+        val ivFpTestImage = dialogView.findViewById<ImageView>(R.id.ivFpTestImage)
+        val pbFpTestImageProgress = dialogView.findViewById<ProgressBar>(R.id.pbFpTestImageProgress)
+        val tvFpTestIdBadge = dialogView.findViewById<TextView>(R.id.tvFpTestIdBadge)
+        val tvFpTestImageInfo = dialogView.findViewById<TextView>(R.id.tvFpTestImageInfo)
         val btnCancel = dialogView.findViewById<Button>(R.id.btnCancelFpSettings)
         val btnSave = dialogView.findViewById<Button>(R.id.btnSaveFpSettings)
 
@@ -1491,6 +1774,22 @@ class MainActivity : AppCompatActivity() {
         rbEnroll2TouchRef = rb2Touch
         swFpSendImageRef = swSendImage
         tvFpTestStatusRef = tvTestStatus
+        ivFpTestImageRef = ivFpTestImage
+        pbFpTestImageProgressRef = pbFpTestImageProgress
+        tvFpTestIdBadgeRef = tvFpTestIdBadge
+        tvFpTestImageInfoRef = tvFpTestImageInfo
+
+        // Hiển thị ảnh cache gần nhất nếu có sẵn trong bộ nhớ tạm
+        val cachedFpFile = File(cacheDir, "last_r503_scan.png")
+        if (cachedFpFile.exists()) {
+            val bmp = BitmapFactory.decodeFile(cachedFpFile.absolutePath)
+            if (bmp != null) {
+                ivFpTestImage.setImageBitmap(bmp)
+                ivFpTestImage.colorFilter = null
+                val timeStr = getSharedPreferences("BT_PREF", MODE_PRIVATE).getString("LAST_FP_IMG_TIME", "") ?: ""
+                tvFpTestImageInfo.text = if (timeStr.isNotEmpty()) "Ảnh gần nhất: $timeStr" else "Ảnh lưu trong bộ nhớ tạm"
+            }
+        }
 
         // Security level slider: max 4 (0 -> 4 corresponds to level 1 -> 5)
         sbSecLevel.progress = (fpSecLevelVal - 1).coerceIn(0, 4)
@@ -1535,8 +1834,24 @@ class MainActivity : AppCompatActivity() {
 
         btnLiveTest.setOnClickListener {
             sendVehicleCommand("TEST_FP|15")
-            tvTestStatus.text = "⏳ Chế độ test đang chạy (15s). Hãy đặt ngón tay lên cảm biến R503 ngay bây giờ!"
+            tvTestStatus.text = "🔍 Chế độ quét thử đọc mã vân tay (15s) đang chạy...\nHãy đặt ngón tay bất kỳ lên cảm biến R503 để đọc mã!"
             tvTestStatus.setTextColor(ContextCompat.getColor(this, R.color.gold_primary))
+            tvFpTestIdBadge.text = "CHỜ CHẠM..."
+            tvFpTestIdBadge.setTextColor(ContextCompat.getColor(this, R.color.gold_primary))
+            pbFpTestImageProgress.visibility = View.VISIBLE
+        }
+
+        btnFpTestCaptureImg.setOnClickListener {
+            if (isCapturingLiveImage) {
+                Toast.makeText(this, "Đang trong tiến trình chụp ảnh...", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            startLiveFingerprintCapture()
+            tvTestStatus.text = "📸 Đang chờ chạm ngón tay để chụp ảnh lăng kính R503..."
+            tvTestStatus.setTextColor(ContextCompat.getColor(this, R.color.secondary_teal))
+            tvFpTestIdBadge.text = "CHỤP ẢNH"
+            tvFpTestIdBadge.setTextColor(ContextCompat.getColor(this, R.color.secondary_teal))
+            pbFpTestImageProgress.visibility = View.VISIBLE
         }
 
         btnCancel.setOnClickListener {
@@ -1556,6 +1871,12 @@ class MainActivity : AppCompatActivity() {
             .setView(dialogView)
             .create()
         fpSettingsDialog?.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        fpSettingsDialog?.setOnDismissListener {
+            ivFpTestImageRef = null
+            pbFpTestImageProgressRef = null
+            tvFpTestIdBadgeRef = null
+            tvFpTestImageInfoRef = null
+        }
         fpSettingsDialog?.show()
 
         // Yêu cầu ESP32 trả về cấu hình hiện tại để đồng bộ chính xác
@@ -1595,40 +1916,548 @@ class MainActivity : AppCompatActivity() {
         }
 
         swFpSendImageRef?.isChecked = fpSendImageVal
+        findViewById<SwitchCompat?>(R.id.swTabImageMode)?.isChecked = fpSendImageVal
+        findViewById<TextView?>(R.id.tvTabImageModeSubtitle)?.text = if (fpSendImageVal) "🟢 Đang BẬT: Truyền ảnh quang học (Đầy đủ trực quan)" else "⚪ Đang TẮT: Quẹt xe siêu tốc, tiết kiệm băng thông & CPU"
         getSharedPreferences("BT_PREF", MODE_PRIVATE).edit().putBoolean("FP_SEND_IMG", fpSendImageVal).apply()
     }
 
-    private fun decodeR503ImageToBitmap(rawBytes: ByteArray, width: Int = 192, height: Int = 192): Bitmap? {
-        val totalPixels = width * height
-        val neededBytes = totalPixels / 2
-        if (rawBytes.size < neededBytes) {
-            Log.w("FP_IMG", "Decoded bytes too short: ${rawBytes.size} < $neededBytes")
-            return null
+    private fun getCurrentTabState(): LedEventState {
+        return when (currentLedTab) {
+            0 -> ledUnlocked
+            1 -> ledLocked
+            2 -> ledSuccess
+            else -> ledError
         }
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val pixels = IntArray(totalPixels)
-        var byteIdx = 0
-        for (i in 0 until totalPixels step 2) {
-            if (byteIdx >= rawBytes.size) break
-            val b = rawBytes[byteIdx].toInt() and 0xFF
-            byteIdx++
+    }
 
-            // Pixel 1: high nibble (4 bits)
-            val p1 = (b ushr 4) and 0x0F
-            // Pixel 2: low nibble (4 bits)
-            val p2 = b and 0x0F
+    private fun getSpeedDesc(speed: Int): String {
+        return when {
+            speed < 50 -> "Rất nhanh"
+            speed < 90 -> "Nhanh"
+            speed < 150 -> "Mượt mà"
+            else -> "Chậm"
+        }
+    }
 
-            // R503 optical sensor: 0 is dark (ridge), 15 (0xF) is bright (background)
-            val g1 = p1 * 17
-            val g2 = p2 * 17
+    private fun updateLedConfigDialogUI() {
+        runOnUiThread {
+            refreshCurrentLedTabUI()
+        }
+    }
 
-            pixels[i] = (0xFF shl 24) or (g1 shl 16) or (g1 shl 8) or g1
-            if (i + 1 < totalPixels) {
-                pixels[i + 1] = (0xFF shl 24) or (g2 shl 16) or (g2 shl 8) or g2
+    private fun refreshCurrentLedTabUI() {
+        val state = getCurrentTabState()
+        rgbColorWheelRef?.setColorIndex(state.color)
+
+        val info = RgbColorWheelView.getColorInfo(state.color)
+        tvSelectedColorDisplayRef?.text = "Màu Đang Chọn: ${info.name}"
+        tvSelectedColorDisplayRef?.setTextColor(info.hex)
+
+        when (state.mode) {
+            1 -> rgEffectModeRef?.check(R.id.rbModeBreathing)
+            2 -> rgEffectModeRef?.check(R.id.rbModeFlashing)
+            3 -> rgEffectModeRef?.check(R.id.rbModeOn)
+            4 -> rgEffectModeRef?.check(R.id.rbModeOff)
+            else -> rgEffectModeRef?.check(R.id.rbModeBreathing)
+        }
+
+        sbEffectSpeedRef?.progress = state.speed.coerceIn(0, 220)
+        tvSpeedValueRef?.text = "${state.speed} (${getSpeedDesc(state.speed)})"
+
+        // Highlight active tab button
+        val activeBg = R.drawable.button_background_secondary_on
+        val inactiveBg = R.drawable.button_background_secondary
+        btnTabUnlockedRef?.setBackgroundResource(if (currentLedTab == 0) activeBg else inactiveBg)
+        btnTabUnlockedRef?.setTextColor(if (currentLedTab == 0) Color.WHITE else 0xFF94A3B8.toInt())
+
+        btnTabLockedRef?.setBackgroundResource(if (currentLedTab == 1) activeBg else inactiveBg)
+        btnTabLockedRef?.setTextColor(if (currentLedTab == 1) Color.WHITE else 0xFF94A3B8.toInt())
+
+        btnTabSuccessRef?.setBackgroundResource(if (currentLedTab == 2) activeBg else inactiveBg)
+        btnTabSuccessRef?.setTextColor(if (currentLedTab == 2) Color.WHITE else 0xFF94A3B8.toInt())
+
+        btnTabErrorRef?.setBackgroundResource(if (currentLedTab == 3) activeBg else inactiveBg)
+        btnTabErrorRef?.setTextColor(if (currentLedTab == 3) Color.WHITE else 0xFF94A3B8.toInt())
+
+        val badgeText = when (currentLedTab) {
+            0 -> "Đang chỉnh: [Xe Mở Khóa / Đang Chạy]"
+            1 -> "Đang chỉnh: [Xe Đang Khóa / Đỗ Xe]"
+            2 -> "Đang chỉnh: [Quét Đúng / Mở Xe Thành Công]"
+            else -> "Đang chỉnh: [Quét Sai / Cảnh Báo Trộm]"
+        }
+        val badgeColor = when (currentLedTab) {
+            0 -> 0xFF38BDF8.toInt()
+            1 -> 0xFF94A3B8.toInt()
+            2 -> 0xFF4ADE80.toInt()
+            else -> 0xFFF87171.toInt()
+        }
+        tvCurrentEditingBadgeRef?.text = badgeText
+        tvCurrentEditingBadgeRef?.setTextColor(badgeColor)
+    }
+
+    private fun showR503LedSettingsDialog() {
+        if (!isConnectedToVehicle()) {
+            Toast.makeText(this, "Vui lòng kết nối Bluetooth tới xe trước!", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_r503_led_settings, null)
+        val dialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .create()
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        ledConfigDialog = dialog
+
+        val btnTabUnlocked = dialogView.findViewById<Button>(R.id.btnTabUnlocked)
+        val btnTabLocked = dialogView.findViewById<Button>(R.id.btnTabLocked)
+        val btnTabSuccess = dialogView.findViewById<Button>(R.id.btnTabSuccess)
+        val btnTabError = dialogView.findViewById<Button>(R.id.btnTabError)
+        val tvCurrentEditingBadge = dialogView.findViewById<TextView>(R.id.tvCurrentEditingBadge)
+        val rgbColorWheel = dialogView.findViewById<RgbColorWheelView>(R.id.rgbColorWheel)
+        val tvSelectedColorDisplay = dialogView.findViewById<TextView>(R.id.tvSelectedColorDisplay)
+        val rgEffectMode = dialogView.findViewById<RadioGroup>(R.id.rgEffectMode)
+        val tvSpeedValue = dialogView.findViewById<TextView>(R.id.tvSpeedValue)
+        val sbEffectSpeed = dialogView.findViewById<SeekBar>(R.id.sbEffectSpeed)
+
+        val btnPresetOcean = dialogView.findViewById<Button>(R.id.btnPresetOcean)
+        val btnPresetCyberpunk = dialogView.findViewById<Button>(R.id.btnPresetCyberpunk)
+        val btnPresetRacing = dialogView.findViewById<Button>(R.id.btnPresetRacing)
+        val btnPresetEmerald = dialogView.findViewById<Button>(R.id.btnPresetEmerald)
+        val btnPresetStealth = dialogView.findViewById<Button>(R.id.btnPresetStealth)
+
+        val btnTestLedLive = dialogView.findViewById<Button>(R.id.btnTestLedLive)
+        val btnSaveLedConfig = dialogView.findViewById<Button>(R.id.btnSaveLedConfig)
+        val btnDismissLedDialog = dialogView.findViewById<Button>(R.id.btnDismissLedDialog)
+
+        rgbColorWheelRef = rgbColorWheel
+        tvSelectedColorDisplayRef = tvSelectedColorDisplay
+        rgEffectModeRef = rgEffectMode
+        sbEffectSpeedRef = sbEffectSpeed
+        tvSpeedValueRef = tvSpeedValue
+        tvCurrentEditingBadgeRef = tvCurrentEditingBadge
+        btnTabUnlockedRef = btnTabUnlocked
+        btnTabLockedRef = btnTabLocked
+        btnTabSuccessRef = btnTabSuccess
+        btnTabErrorRef = btnTabError
+
+        // Gửi lệnh đọc cấu hình đèn LED hiện tại từ ESP32
+        sendVehicleCommand("GET_LED_CFG")
+
+        // Tab selection click listeners
+        btnTabUnlocked.setOnClickListener { currentLedTab = 0; refreshCurrentLedTabUI() }
+        btnTabLocked.setOnClickListener { currentLedTab = 1; refreshCurrentLedTabUI() }
+        btnTabSuccess.setOnClickListener { currentLedTab = 2; refreshCurrentLedTabUI() }
+        btnTabError.setOnClickListener { currentLedTab = 3; refreshCurrentLedTabUI() }
+
+        // Color wheel listener
+        rgbColorWheel.onColorSelected = { colorIndex, colorHex, colorName ->
+            val state = getCurrentTabState()
+            state.color = colorIndex
+            tvSelectedColorDisplay.text = "Màu Đang Chọn: $colorName"
+            tvSelectedColorDisplay.setTextColor(colorHex)
+        }
+
+        // Effect mode radio group listener
+        rgEffectMode.setOnCheckedChangeListener { _, checkedId ->
+            val state = getCurrentTabState()
+            state.mode = when (checkedId) {
+                R.id.rbModeBreathing -> 1
+                R.id.rbModeOn -> 3
+                R.id.rbModeFlashing -> 2
+                else -> 4 // rbModeOff
             }
         }
+
+        // Speed seekbar listener
+        sbEffectSpeed.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                val state = getCurrentTabState()
+                state.speed = progress
+                tvSpeedValue.text = "$progress (${getSpeedDesc(progress)})"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        // Presets listeners
+        btnPresetOcean.setOnClickListener {
+            ledUnlocked = LedEventState(1, RgbColorWheelView.COLOR_CYAN, 120)
+            ledLocked   = LedEventState(4, RgbColorWheelView.COLOR_CYAN, 0)
+            ledSuccess  = LedEventState(2, RgbColorWheelView.COLOR_BLUE, 40)
+            ledError    = LedEventState(2, RgbColorWheelView.COLOR_RED, 30)
+            refreshCurrentLedTabUI()
+            Toast.makeText(this, "Áp dụng phong cách: 🐬 Ocean Cyan", Toast.LENGTH_SHORT).show()
+        }
+
+        btnPresetCyberpunk.setOnClickListener {
+            ledUnlocked = LedEventState(1, RgbColorWheelView.COLOR_PURPLE, 100)
+            ledLocked   = LedEventState(4, RgbColorWheelView.COLOR_PURPLE, 0)
+            ledSuccess  = LedEventState(2, RgbColorWheelView.COLOR_GREEN, 40)
+            ledError    = LedEventState(2, RgbColorWheelView.COLOR_RED, 30)
+            refreshCurrentLedTabUI()
+            Toast.makeText(this, "Áp dụng phong cách: 🟣 Cyberpunk Purple", Toast.LENGTH_SHORT).show()
+        }
+
+        btnPresetRacing.setOnClickListener {
+            ledUnlocked = LedEventState(1, RgbColorWheelView.COLOR_RED, 90)
+            ledLocked   = LedEventState(4, RgbColorWheelView.COLOR_RED, 0)
+            ledSuccess  = LedEventState(2, RgbColorWheelView.COLOR_YELLOW, 40)
+            ledError    = LedEventState(2, RgbColorWheelView.COLOR_RED, 30)
+            refreshCurrentLedTabUI()
+            Toast.makeText(this, "Áp dụng phong cách: 🏎️ Sport Racing Red", Toast.LENGTH_SHORT).show()
+        }
+
+        btnPresetEmerald.setOnClickListener {
+            ledUnlocked = LedEventState(1, RgbColorWheelView.COLOR_GREEN, 130)
+            ledLocked   = LedEventState(4, RgbColorWheelView.COLOR_GREEN, 0)
+            ledSuccess  = LedEventState(2, RgbColorWheelView.COLOR_CYAN, 40)
+            ledError    = LedEventState(2, RgbColorWheelView.COLOR_RED, 30)
+            refreshCurrentLedTabUI()
+            Toast.makeText(this, "Áp dụng phong cách: 🌿 Emerald Nature", Toast.LENGTH_SHORT).show()
+        }
+
+        btnPresetStealth.setOnClickListener {
+            ledUnlocked = LedEventState(3, RgbColorWheelView.COLOR_BLUE, 50)
+            ledLocked   = LedEventState(4, RgbColorWheelView.COLOR_BLUE, 0)
+            ledSuccess  = LedEventState(2, RgbColorWheelView.COLOR_WHITE, 30)
+            ledError    = LedEventState(2, RgbColorWheelView.COLOR_RED, 30)
+            refreshCurrentLedTabUI()
+            Toast.makeText(this, "Áp dụng phong cách: 🛡️ Stealth Eco (Tiết Kiệm Điện)", Toast.LENGTH_SHORT).show()
+        }
+
+        // Live Test on R503
+        btnTestLedLive.setOnClickListener {
+            val state = getCurrentTabState()
+            val testCmd = "TEST_LED|${state.mode}|${state.color}|${state.speed}|3"
+            sendVehicleCommand(testCmd)
+            triggerHapticFeedback()
+            Toast.makeText(this, "⚡ Đang gửi lệnh thử nghiệm lên R503...", Toast.LENGTH_SHORT).show()
+        }
+
+        // Save LED Config to ESP32 Flash
+        btnSaveLedConfig.setOnClickListener {
+            val saveCmd = "SET_LED_CFG|" +
+                    "${ledUnlocked.mode}|${ledUnlocked.color}|${ledUnlocked.speed}|" +
+                    "${ledLocked.mode}|${ledLocked.color}|${ledLocked.speed}|" +
+                    "${ledSuccess.mode}|${ledSuccess.color}|${ledSuccess.speed}|" +
+                    "${ledError.mode}|${ledError.color}|${ledError.speed}"
+            sendVehicleCommand(saveCmd)
+            triggerHapticFeedback()
+            Toast.makeText(this, "💾 Đang lưu cấu hình xuống xe...", Toast.LENGTH_SHORT).show()
+        }
+
+        btnDismissLedDialog.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        refreshCurrentLedTabUI()
+        dialog.show()
+    }
+
+    private fun safeDecodeR503Base64ToBitmap(fullB64: String, width: Int = 192, height: Int = 192): Bitmap? {
+        if (fullB64.isBlank()) return null
+        val cleanB64 = fullB64.replace("\n", "").replace("\r", "").replace(" ", "").trim()
+        var rawBytes: ByteArray? = null
+
+        // Phương pháp 1: Chuẩn RFC 4648 (khi firmware gửi chunk bội số của 3 không padding)
+        try {
+            rawBytes = Base64.decode(cleanB64, Base64.DEFAULT)
+        } catch (e: Exception) {
+            Log.w("FP_IMG", "Standard Base64 decode failed (${e.message}), trying chunked fallback...")
+        }
+
+        // Phương pháp 2: Fallback ghép và giải mã từng chunk nếu có ký tự '=' ở giữa các chunk
+        if (rawBytes == null || rawBytes.isEmpty()) {
+            try {
+                val bos = ByteArrayOutputStream()
+                val parts = cleanB64.split("=").map { it.trim() }.filter { it.isNotEmpty() }
+                for (part in parts) {
+                    val padNeeded = (4 - (part.length % 4)) % 4
+                    val chunkWithPad = part + "=".repeat(padNeeded)
+                    try {
+                        val b = Base64.decode(chunkWithPad, Base64.DEFAULT)
+                        if (b != null && b.isNotEmpty()) {
+                            bos.write(b)
+                        }
+                    } catch (_: Exception) {}
+                }
+                if (bos.size() > 0) {
+                    rawBytes = bos.toByteArray()
+                    Log.i("FP_IMG", "Chunked fallback decode succeeded: ${rawBytes.size} bytes")
+                }
+            } catch (e2: Exception) {
+                Log.e("FP_IMG", "Chunked fallback error", e2)
+            }
+        }
+
+        // Phương pháp 3: Fallback Base64.NO_PADDING
+        if (rawBytes == null || rawBytes.isEmpty()) {
+            try {
+                rawBytes = Base64.decode(cleanB64, Base64.NO_PADDING)
+            } catch (_: Exception) {}
+        }
+
+        if (rawBytes == null || rawBytes.isEmpty()) {
+            Log.e("FP_IMG", "All Base64 decode strategies failed for length: ${cleanB64.length}")
+            return null
+        }
+
+        Log.i("FP_IMG", "Decoded ${rawBytes.size} bytes. Generating Bitmap $width x $height...")
+        lastRawFingerprintBytes = rawBytes
+        return decodeR503ImageToBitmap(rawBytes, width, height, isOpticalInvertMode)
+    }
+
+    private var lastRawFingerprintBytes: ByteArray? = null
+    private var isOpticalInvertMode: Boolean = false
+
+    private fun decodeR503ImageToBitmap(
+        rawBytes: ByteArray,
+        width: Int = 192,
+        height: Int = 192,
+        invert: Boolean = false
+    ): Bitmap? {
+        if (rawBytes.isEmpty()) return null
+        val totalPixels = width * height
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val pixels = IntArray(totalPixels)
+        val rawNibbles = IntArray(totalPixels)
+
+        val maxBytes = Math.min(rawBytes.size, totalPixels / 2)
+        val hist = IntArray(16)
+
+        // 1. Trích xuất các nibble 4-bit (16 mức xám: 0..15) từ byte UART
+        for (idx in 0 until maxBytes) {
+            val b = rawBytes[idx].toInt() and 0xFF
+            val p1 = (b ushr 4) and 0x0F
+            val p2 = b and 0x0F
+            val i = idx * 2
+
+            rawNibbles[i] = p1
+            hist[p1]++
+
+            if (i + 1 < totalPixels) {
+                rawNibbles[i + 1] = p2
+                hist[p2]++
+            }
+        }
+
+        // 2. Tính toán ngưỡng Histogram Percentile (3% - 97%) để loại bỏ nhiễu biên ngoài lăng kính R503
+        val validPixels = Math.min(totalPixels, maxBytes * 2)
+        val clipLower = (validPixels * 0.03).toInt()
+        val clipUpper = (validPixels * 0.97).toInt()
+
+        var cumSum = 0
+        var lowBound = -1
+        var highBound = 15
+
+        for (lvl in 0..15) {
+            cumSum += hist[lvl]
+            if (cumSum >= clipLower && lowBound == -1) {
+                lowBound = lvl
+            }
+            if (cumSum >= clipUpper) {
+                highBound = lvl
+                break
+            }
+        }
+
+        if (lowBound == -1) lowBound = 0
+        if (highBound <= lowBound) {
+            lowBound = 0
+            highBound = 15
+        }
+
+        val range = (highBound - lowBound).coerceAtLeast(1)
+
+        // 3. Kéo giãn tương phản toàn dải kết hợp đường cong Sigmoid / S-Curve làm sắc nét vân tay
+        for (i in 0 until totalPixels) {
+            if (i >= validPixels) {
+                pixels[i] = if (!invert) 0xFFF0F0F0.toInt() else 0xFF0D1117.toInt()
+                continue
+            }
+            val raw = rawNibbles[i]
+
+            // Chuẩn hóa mức xám trong khoảng 0.0 .. 1.0 theo dải vân tay thực tế
+            val norm = ((raw - lowBound).toFloat() / range).coerceIn(0f, 1f)
+
+            // Áp dụng hàm S-Curve phi tuyến tính để đẩy mạnh độ dốc giữa đỉnh vân (ridge) và rãnh vân (valley)
+            val enhanced = if (norm < 0.5f) {
+                2f * norm * norm
+            } else {
+                1f - 2f * (1f - norm) * (1f - norm)
+            }
+
+            if (!invert) {
+                // CHUẨN QUANG HỌC NÉT CAO (Optical Clear - Chuẩn phòng Lab):
+                // Nền kính sáng sạch sẽ (240..255), đường vân tay màu đen sẫm sắc nét rõ từng chi tiết (0..50)
+                val gray = (enhanced * 255f).toInt().coerceIn(0, 255)
+                pixels[i] = (0xFF shl 24) or (gray shl 16) or (gray shl 8) or gray
+            } else {
+                // CHẾ ĐỘ BIOMETRIC NEON (High-Tech Scanner):
+                // Nền tối sâu, đường vân tay phát sáng vàng kim biometric nổi bật
+                val inv = (255f * (1f - enhanced)).toInt().coerceIn(0, 255)
+                val r = (inv * 0.98f).toInt().coerceIn(0, 255)
+                val g = (inv * 0.82f).toInt().coerceIn(0, 255)
+                val b = (inv * 0.40f).toInt().coerceIn(0, 255)
+                pixels[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+            }
+        }
+
         bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
         return bitmap
+    }
+
+    private fun reRenderFingerprintImage() {
+        val bytes = lastRawFingerprintBytes ?: return
+        val bmp = decodeR503ImageToBitmap(bytes, 192, 192, isOpticalInvertMode) ?: return
+        saveCachedFingerprintImage(bmp)
+        runOnUiThread {
+            ivTabFingerprintImageRef?.let {
+                ImageViewCompat.setImageTintList(it, null)
+                it.imageTintList = null
+                it.colorFilter = null
+                it.setImageBitmap(bmp)
+            }
+            ivFpTestImageRef?.let {
+                ImageViewCompat.setImageTintList(it, null)
+                it.imageTintList = null
+                it.colorFilter = null
+                it.setImageBitmap(bmp)
+            }
+        }
+    }
+
+    private fun showFingerprintImageZoomDialog(bmp: Bitmap) {
+        val dialog = AlertDialog.Builder(this).create()
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(40, 40, 40, 40)
+            setBackgroundColor(0xFF0F172A.toInt())
+        }
+
+        val tvTitle = TextView(this).apply {
+            text = "🔍 ẢNH VÂN TAY QUANG HỌC R503"
+            setTextColor(0xFFFFC107.toInt())
+            textSize = 15f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 16)
+        }
+        layout.addView(tvTitle)
+
+        val card = CardView(this).apply {
+            radius = 24f
+            cardElevation = 8f
+            setCardBackgroundColor(if (!isOpticalInvertMode) 0xFFFFFFFF.toInt() else 0xFF000000.toInt())
+            layoutParams = LinearLayout.LayoutParams(540, 540).apply {
+                gravity = Gravity.CENTER
+                setMargins(0, 10, 0, 20)
+            }
+        }
+
+        val imgView = ImageView(this).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            ImageViewCompat.setImageTintList(this, null)
+            imageTintList = null
+            colorFilter = null
+            setImageBitmap(bmp)
+        }
+        card.addView(imgView)
+        layout.addView(card)
+
+        val tvMeta = TextView(this).apply {
+            text = "Độ phân giải: 192 x 192 px (508 DPI)\nChế độ: " + if (!isOpticalInvertMode) "Quang học chuẩn nét (Optical Clear)" else "Biometric Vàng Kim (Neon)"
+            setTextColor(0xFFCBD5E1.toInt())
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 24)
+        }
+        layout.addView(tvMeta)
+
+        val btnToggleMode = AppCompatButton(this).apply {
+            text = if (!isOpticalInvertMode) "🟡 Đổi sang Chế độ Biometric Neon" else "⚪ Đổi sang Chế độ Quang học chuẩn nét"
+            setBackgroundColor(0xFF1E293B.toInt())
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = 12f
+            setPadding(24, 16, 24, 16)
+            setOnClickListener {
+                isOpticalInvertMode = !isOpticalInvertMode
+                reRenderFingerprintImage()
+                val newBmp = decodeR503ImageToBitmap(lastRawFingerprintBytes ?: return@setOnClickListener, 192, 192, isOpticalInvertMode)
+                if (newBmp != null) {
+                    imgView.setImageBitmap(newBmp)
+                    card.setCardBackgroundColor(if (!isOpticalInvertMode) 0xFFFFFFFF.toInt() else 0xFF000000.toInt())
+                    tvMeta.text = "Độ phân giải: 192 x 192 px (508 DPI)\nChế độ: " + if (!isOpticalInvertMode) "Quang học chuẩn nét (Optical Clear)" else "Biometric Vàng Kim (Neon)"
+                    text = if (!isOpticalInvertMode) "🟡 Đổi sang Chế độ Biometric Neon" else "⚪ Đổi sang Chế độ Quang học chuẩn nét"
+                }
+            }
+        }
+        layout.addView(btnToggleMode)
+
+        val btnClose = AppCompatButton(this).apply {
+            text = "Đóng"
+            setBackgroundColor(0x00000000)
+            setTextColor(0xFF94A3B8.toInt())
+            textSize = 12f
+            setOnClickListener { dialog.dismiss() }
+        }
+        layout.addView(btnClose)
+
+        dialog.setView(layout)
+        dialog.show()
+    }
+
+    private fun startLiveFingerprintCapture() {
+        isCapturingLiveImage = true
+        enrollImageBuffer.setLength(0)
+        pbTabImageProgressRef?.visibility = View.VISIBLE
+        tvTabImageStatusRef?.text = "📸 Đang chờ chạm ngón tay..."
+        tvTabImageDescRef?.text = "Đèn cảm biến đang sáng tím. Hãy áp ngón tay và giữ êm trên R503."
+        triggerHapticFeedback()
+        sendVehicleCommand("CAPTURE_FP_IMG")
+    }
+
+    private fun saveCachedFingerprintImage(bmp: Bitmap) {
+        try {
+            val file = File(cacheDir, "last_r503_scan.png")
+            FileOutputStream(file).use { out ->
+                bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+            }
+            val timeStr = SimpleDateFormat("HH:mm - dd/MM", Locale.getDefault()).format(Date())
+            getSharedPreferences("BT_PREF", MODE_PRIVATE).edit()
+                .putString("LAST_FP_IMG_TIME", timeStr)
+                .apply()
+        } catch (e: Exception) {
+            Log.e("FP_IMG", "Error saving cached image", e)
+        }
+    }
+
+    private fun loadCachedFingerprintImage() {
+        try {
+            val file = File(cacheDir, "last_r503_scan.png")
+            if (file.exists()) {
+                val bmp = BitmapFactory.decodeFile(file.absolutePath)
+                if (bmp != null) {
+                    ivTabFingerprintImageRef?.let {
+                        ImageViewCompat.setImageTintList(it, null)
+                        it.imageTintList = null
+                        it.colorFilter = null
+                        it.setImageBitmap(bmp)
+                    }
+                    val timeStr = getSharedPreferences("BT_PREF", MODE_PRIVATE)
+                        .getString("LAST_FP_IMG_TIME", "") ?: ""
+                    tvTabImageStatusRef?.text = "Ảnh quét gần nhất"
+                    tvTabImageDescRef?.text = if (timeStr.isNotEmpty()) "Thời gian: $timeStr" else "Đã lưu trong bộ nhớ tạm"
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("FP_IMG", "Error loading cached image", e)
+        }
     }
 
     // ==========================================

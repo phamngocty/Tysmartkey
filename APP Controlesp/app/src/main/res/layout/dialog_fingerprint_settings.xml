@@ -310,7 +310,7 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- 5. CHẠM THỬ NGÓN TAY ĐỂ TEST CẢM BIẾN (LIVE TEST) -->
+        <!-- 5. KIỂM TRA & HIỂN THỊ ẢNH VÂN TAY (LIVE TEST & IMAGE VERIFICATION) -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -325,36 +325,128 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 
-                <TextView
+                <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="🎯 Thử nghiệm nhận diện ngón tay"
-                    android:textColor="@color/white"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
+                    android:orientation="vertical">
 
-                <androidx.appcompat.widget.AppCompatButton
-                    android:id="@+id/btnFpLiveTest"
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="🔬 KIỂM TRA CẢM BIẾN &amp; ĐỌC MÃ VÂN TAY"
+                        android:textColor="@color/white"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="Đặt ngón tay bất kỳ để đọc mã vân tay thực tế &amp; ảnh lăng kính"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tvFpTestIdBadge"
                     android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:background="@drawable/btn_gold_hero"
-                    android:paddingHorizontal="14dp"
-                    android:text="Chạm Thử"
-                    android:textAllCaps="false"
-                    android:textColor="@color/black"
-                    android:textSize="11sp"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_terminal_inner"
+                    android:paddingHorizontal="10dp"
+                    android:paddingVertical="4dp"
+                    android:text="SẴN SÀNG"
+                    android:textColor="@color/gold_primary"
+                    android:textSize="10sp"
                     android:textStyle="bold" />
             </LinearLayout>
 
+            <!-- KHUNG HIỂN THỊ ẢNH QUANG HỌC R503 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:gravity="center_horizontal"
+                android:orientation="vertical">
+
+                <FrameLayout
+                    android:layout_width="110dp"
+                    android:layout_height="110dp"
+                    android:background="@drawable/r503_gold_ring">
+
+                    <ImageView
+                        android:id="@+id/ivFpTestImage"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:layout_margin="6dp"
+                        android:background="@drawable/bg_terminal_inner"
+                        android:contentDescription="Ảnh vân tay quang học"
+                        android:padding="8dp"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/ic_fingerprint" />
+
+                    <ProgressBar
+                        android:id="@+id/pbFpTestImageProgress"
+                        android:layout_width="36dp"
+                        android:layout_height="36dp"
+                        android:layout_gravity="center"
+                        android:indeterminateTint="@color/gold_primary"
+                        android:visibility="gone" />
+                </FrameLayout>
+
+                <TextView
+                    android:id="@+id/tvFpTestImageInfo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="Ảnh quang học 192x192 (508 DPI)"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="10sp" />
+            </LinearLayout>
+
+            <!-- 2 NÚT HÀNH ĐỘNG: QUÉT THỬ MÃ VÂN TAY & CHỤP ẢNH LĂNG KÍNH -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="horizontal">
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnFpLiveTest"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/btn_gold_hero"
+                    android:text="🔍 Quét Thử Mã Vân Tay"
+                    android:textAllCaps="false"
+                    android:textColor="@color/black"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnFpTestCaptureImg"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/header_icon_btn_bg"
+                    android:text="📸 Chụp Lăng Kính"
+                    android:textAllCaps="false"
+                    android:textColor="@color/white"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- TERMINAL LOG TRẠNG THÁI & MÃ VÂN TAY -->
             <TextView
                 android:id="@+id/tvFpTestStatus"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="10dp"
                 android:background="@drawable/bg_terminal_inner"
-                android:padding="10dp"
-                android:text="Nhấn 'Chạm Thử' rồi đặt ngón tay lên cảm biến để kiểm tra độ nhạy và điểm tin cậy (Confidence)."
+                android:padding="12dp"
+                android:text="Nhấn 'Quét Thử Mã Vân Tay' hoặc 'Chụp Lăng Kính' rồi đặt ngón tay lên cảm biến R503 để đọc mã vân tay."
                 android:textColor="@color/gold_primary"
                 android:textSize="11sp"
                 android:fontFamily="monospace" />

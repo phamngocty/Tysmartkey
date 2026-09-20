@@ -4,24 +4,7 @@
             "outputFile": "com.example.control_esp.wear-mergeDebugResources-37:/values-pt/values-pt.xml",
             "map": [
                 {
-                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.5.0\\transforms\\10ad62b3704653069e5b34ade80b3147\\transformed\\foundation-release\\res\\values-pt\\values-pt.xml",
-                    "from": {
-                        "startLines": "2,3,4",
-                        "startColumns": "4,4,4",
-                        "startOffsets": "55,146,229",
-                        "endColumns": "90,82,84",
-                        "endOffsets": "141,224,309"
-                    },
-                    "to": {
-                        "startLines": "2,30,31",
-                        "startColumns": "4,4,4",
-                        "startOffsets": "105,2678,2761",
-                        "endColumns": "90,82,84",
-                        "endOffsets": "191,2756,2841"
-                    }
-                },
-                {
-                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.5.0\\transforms\\8bffcc8846e2d6bea6d5d4ac0c134303\\transformed\\core-1.16.0\\res\\values-pt\\values-pt.xml",
+                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.6.0\\transforms\\5a664a2f2ff07975368ee07c298a6338\\transformed\\core-1.16.0\\res\\values-pt\\values-pt.xml",
                     "from": {
                         "startLines": "2,3,4,5,6,7,8,9",
                         "startColumns": "4,4,4,4,4,4,4,4",
@@ -38,7 +21,24 @@
                     }
                 },
                 {
-                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.5.0\\transforms\\82fcf2a5dc806172a78f479eafdac75b\\transformed\\ui-release\\res\\values-pt\\values-pt.xml",
+                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.6.0\\transforms\\3ebbee1068c6b6aee81f0377ca29bbe6\\transformed\\foundation-release\\res\\values-pt\\values-pt.xml",
+                    "from": {
+                        "startLines": "2,3,4",
+                        "startColumns": "4,4,4",
+                        "startOffsets": "55,146,229",
+                        "endColumns": "90,82,84",
+                        "endOffsets": "141,224,309"
+                    },
+                    "to": {
+                        "startLines": "2,30,31",
+                        "startColumns": "4,4,4",
+                        "startOffsets": "105,2678,2761",
+                        "endColumns": "90,82,84",
+                        "endOffsets": "191,2756,2841"
+                    }
+                },
+                {
+                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.6.0\\transforms\\fe778710c89dd29db76fea357e5b77f1\\transformed\\ui-release\\res\\values-pt\\values-pt.xml",
                     "from": {
                         "startLines": "3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21",
                         "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4",

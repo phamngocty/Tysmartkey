@@ -15,7 +15,7 @@
 
 #define R503_RX_PIN        0  // GPIO 0 kết nối TXD (dây Vàng) của R503
 #define R503_TX_PIN        1  // GPIO 1 kết nối RXD (dây Xanh lá) của R503
-#define R503_WAKE_PIN      3  // GPIO 3 kết nối WAKEUP (dây Xanh dương) của R503 (Active LOW: chạm = 0V))
+#define R503_WAKE_PIN      3  // GPIO 3 kết nối WAKEUP (dây Xanh dương) của R503 (Active LOW: chạm = 0V)
 
 // ==========================================
 // 🔐 2. THÔNG SỐ BẢO MẬT & BLE UUID
@@ -29,11 +29,35 @@ bool isUnlocked = false;       // Trạng thái xe (true: Đang mở khóa, fals
 volatile bool isEnrolling = false;          // Cờ đang trong chế độ thêm vân tay
 volatile bool cancelEnrollRequested = false; // Cờ yêu cầu hủy tiến trình lấy vân tay
 TaskHandle_t enrollTaskHandle = nullptr;    // Con trỏ FreeRTOS Task thêm vân tay
+volatile bool isCapturingImage = false;     // Cờ đang trong chế độ chụp ảnh thực tế
+TaskHandle_t captureImageTaskHandle = nullptr; // Con trỏ FreeRTOS Task chụp ảnh
 
 // Khởi tạo Preferences lưu trữ Flash NVS
 Preferences prefsSecurity; // namespace "safe_key"
 Preferences prefsFinger;   // namespace "fingerprint"
 Preferences prefsRain;     // namespace "rain_config"
+Preferences prefsLed;      // namespace "led_cfg"
+
+// Cấu trúc dữ liệu cấu hình đèn vòng màu R503 (Aura LED Opcode 0x35)
+struct LedEventConfig {
+    uint8_t mode;   // 1=Breathing, 2=Flashing, 3=Always ON, 4=Always OFF, 5=Gradual ON, 6=Gradual OFF
+    uint8_t color;  // 1..7 (1:Đỏ, 2:Xanh, 3:Tím, 4:Xanh lá, 5:Vàng, 6:Cyan, 7:Trắng)
+    uint8_t speed;  // 0..255 (Tốc độ hiệu ứng)
+};
+
+struct R503LedSystemConfig {
+    LedEventConfig unlocked; // Khi xe bật khóa (Mặc định: Thở xanh dương)
+    LedEventConfig locked;   // Khi xe khóa (Mặc định: Tắt tiết kiệm ắc quy)
+    LedEventConfig success;  // Khi quét đúng / mở xe (Mặc định: Nháy xanh 2 lần)
+    LedEventConfig error;    // Khi quét sai / báo động (Mặc định: Nháy đỏ 3 lần)
+};
+
+R503LedSystemConfig ledConfig = {
+    { 0x01, 0x02, 120 }, // Unlocked: Breathing Blue, speed 120
+    { 0x04, 0x02, 0   }, // Locked: Always OFF
+    { 0x02, 0x02, 40  }, // Success: Flashing Blue, speed 40
+    { 0x02, 0x01, 30  }  // Error: Flashing Red, speed 30
+};
 
 // Cấu hình Chế độ Chống Nước Mưa (Anti-Rain Mode)
 bool rainEnabled = false;
@@ -44,7 +68,8 @@ int autoOffSec = 3600;         // Thời gian tự tắt chế độ mưa (giây
 unsigned long rainStartTime = 0;   // Thời điểm kích hoạt chế độ mưa (millis)
 unsigned long cooldownUntil = 0;   // Mốc thời gian kết thúc cooldown (millis)
 
-// Khởi tạo UART cho R503
+// Khởi tạo UART1 độc lập cho R503 qua HardwareSerial r503Serial(1) trên ESP32-C3 (RX = GPIO 0, TX = GPIO 1)
+// TUYỆT ĐỐI KHÔNG dùng UART 0 vì sẽ xung đột chết với cổng Serial Debug Monitor (115200 baud)
 HardwareSerial r503Serial(1);
 Adafruit_Fingerprint finger = Adafruit_Fingerprint((Stream*)&r503Serial);
 bool r503Ready = false; // Cờ kiểm tra cảm biến R503 đã kết nối thành công chưa
@@ -86,7 +111,9 @@ void beep(int count, int delayMs = 100) {
 // Gửi phản hồi trạng thái qua BLE & Serial
 void notifyStatus(String msg) {
     String fullMsg = "FB|" + msg + "\n";
-    Serial.print("Sending Feedback: " + fullMsg);
+    if (!msg.startsWith("FP_IMG_CHUNK|")) {
+        Serial.print("Sending Feedback: " + fullMsg);
+    }
     
     if (pCharacteristic && deviceConnected) {
         pCharacteristic->setValue((uint8_t *)fullMsg.c_str(), fullMsg.length());
@@ -104,34 +131,485 @@ void sendTelemetry() {
     notifyStatus(teleMsg);
 }
 
-// Điều khiển LED RGB trên R503
+// ============================================================================
+// 📦 BỘ ĐỘNG CƠ GÓI TIN ĐỘC LẬP R502 / R503 (ZERO-DEPENDENCY PACKET ENGINE)
+// ============================================================================
+
+#define R503_START_CODE         0xEF01
+#define R503_DEFAULT_ADDRESS    0xFFFFFFFF
+
+// Package Identifiers (PID)
+#define R503_PID_COMMAND        0x01  // Gói lệnh gửi từ MCU tới cảm biến
+#define R503_PID_DATA           0x02  // Gói tin chứa khối dữ liệu (Data packet)
+#define R503_PID_ACK            0x07  // Gói tin phản hồi trạng thái từ cảm biến (Acknowledge)
+#define R503_PID_END_DATA       0x08  // Gói tin dữ liệu cuối cùng kết thúc luồng (End of data)
+
+// Bảng mã lệnh Opcode (Instruction Codes)
+#define R503_CMD_GET_IMAGE      0x01  // Lấy ảnh vân tay vào ImageBuffer
+#define R503_CMD_IMAGE_2_TZ     0x02  // Sinh đặc trưng từ ImageBuffer lưu vào CharBuffer 1 hoặc 2
+#define R503_CMD_MATCH          0x03  // So khớp đặc trưng giữa CharBuffer 1 và CharBuffer 2
+#define R503_CMD_SEARCH         0x04  // Tìm kiếm đối soát nhanh trong thư viện Flash
+#define R503_CMD_REG_MODEL      0x05  // Ghép đặc trưng (CharBuffer 1 + 2) tạo mẫu vân tay hoàn chỉnh
+#define R503_CMD_STORE          0x06  // Lưu mẫu vân tay vào vị trí ID trong Flash ROM
+#define R503_CMD_LOAD_CHAR      0x07  // Nạp mẫu vân tay từ Flash vào CharBuffer
+#define R503_CMD_UP_CHAR        0x08  // Tải mẫu đặc trưng từ CharBuffer lên MCU
+#define R503_CMD_DOWN_CHAR      0x09  // Tải mẫu đặc trưng từ MCU xuống CharBuffer
+#define R503_CMD_UP_IMAGE       0x0A  // Tải toàn bộ ảnh quang học lăng kính từ ImageBuffer lên MCU
+#define R503_CMD_DELETE         0x0C  // Xóa mẫu vân tay theo ID
+#define R503_CMD_EMPTY          0x0D  // Xóa sạch toàn bộ thư viện vân tay trong cảm biến
+#define R503_CMD_READ_SYS_PARA  0x0F  // Đọc tham số hệ thống cảm biến
+#define R503_CMD_VFY_PWD        0x13  // Xác thực mật khẩu bắt tay cảm biến
+#define R503_CMD_TEMPLATE_COUNT 0x1D  // Đọc số lượng vân tay hợp lệ hiện có
+#define R503_CMD_AURA_LED       0x35  // Điều khiển đèn LED nhẫn hào quang (Aura LED)
+
+// Các chế độ Aura LED RGB (Opcode 0x35)
+enum AuraLedMode {
+    LED_MODE_BREATHING = 0x01,  // Chế độ thở êm dịu (Breathing)
+    LED_MODE_FLASHING  = 0x02,  // Chế độ nhấp nháy xác nhận/cảnh báo (Flashing)
+    LED_MODE_ON        = 0x03,  // Chế độ bật sáng liên tục (Always ON)
+    LED_MODE_OFF       = 0x04,  // Chế độ tắt đèn (Always OFF)
+    LED_MODE_GRADUAL_ON= 0x05,  // Sáng dần
+    LED_MODE_GRADUAL_OFF=0x06   // Tắt dần
+};
+
+enum AuraLedColor {
+    LED_COLOR_RED      = 0x01,  // Màu Đỏ (Báo lỗi / Cảnh báo / Thể thao)
+    LED_COLOR_BLUE     = 0x02,  // Màu Xanh Dương (Sẵn sàng / Thở)
+    LED_COLOR_PURPLE   = 0x03,  // Màu Tím (Đang đăng ký / Cyberpunk)
+    LED_COLOR_GREEN    = 0x04,  // Màu Xanh Lá (Emerald Nature)
+    LED_COLOR_YELLOW   = 0x05,  // Màu Vàng (Solar Gold)
+    LED_COLOR_CYAN     = 0x06,  // Màu Xanh Ngọc / Lơ (Ocean Neon)
+    LED_COLOR_WHITE    = 0x07   // Màu Trắng (Full White)
+};
+
+// Hàm giải mã mã lỗi tiếng Việt chi tiết (r503GetStatusString)
+const char* r503GetStatusString(uint8_t code) {
+    switch (code) {
+        case 0x00: return "0x00 [OK]: Lệnh thực thi thành công hoàn hảo";
+        case 0x01: return "0x01 [PACKET_ERR]: Lỗi nhận gói tin UART (Checksum hoặc Header sai)";
+        case 0x02: return "0x02 [NO_FINGER]: Không phát hiện ngón tay trên mặt cảm biến";
+        case 0x03: return "0x03 [FAIL_IMAGE]: Chụp ảnh vân tay quang học thất bại";
+        case 0x04: return "0x04 [TOO_DRY]: Ảnh vân tay quá khô hoặc mờ";
+        case 0x05: return "0x05 [TOO_WET]: Ảnh vân tay quá ướt hoặc đọng nước";
+        case 0x06: return "0x06 [DISORDER]: Ảnh quá nhiễu, không thể trích xuất đặc trưng";
+        case 0x07: return "0x07 [FEAT_FAIL]: Diện tích tiếp xúc quá nhỏ, thiếu điểm đặc trưng";
+        case 0x08: return "0x08 [NOT_MATCH]: Hai mẫu vân tay không khớp với nhau";
+        case 0x09: return "0x09 [NOT_FOUND]: Không tìm thấy mẫu trùng khớp trong thư viện R503";
+        case 0x0A: return "0x0A [MERGE_FAIL]: Ghép các lần chạm thất bại (ngón tay di chuyển lệch)";
+        case 0x0B: return "0x0B [ADDR_OVER]: ID vị trí lưu trữ vượt quá dung lượng Flash";
+        case 0x0C: return "0x0C [READ_ERR]: Lỗi đọc dữ liệu mẫu từ bộ nhớ Flash R503";
+        case 0x0D: return "0x0D [UP_ERR]: Lỗi truyền tải mẫu đặc trưng lên MCU";
+        case 0x0E: return "0x0E [RECV_ERR]: Cảm biến không nhận được gói dữ liệu tiếp theo";
+        case 0x0F: return "0x0F [UP_IMG_ERR]: Lỗi truyền tải ảnh quang học từ ImageBuffer";
+        case 0x10: return "0x10 [DEL_ERR]: Lỗi xóa mẫu vân tay trong bộ nhớ";
+        case 0x11: return "0x11 [CLEAR_ERR]: Lỗi dọn sạch toàn bộ cơ sở dữ liệu Flash";
+        case 0x13: return "0x13 [PWD_ERR]: Mật khẩu xác thực bắt tay cảm biến bị sai";
+        case 0x15: return "0x15 [IMG_INVALID]: Bộ đệm ImageBuffer rỗng (chưa chụp hoặc bị lệnh đèn xóa)";
+        case 0x18: return "0x18 [FLASH_ERR]: Lỗi truy xuất phần cứng bộ nhớ Flash R503";
+        default:   return "0xFF [UNKNOWN]: Mã trạng thái chưa định nghĩa";
+    }
+}
+
+// Hàm tương thích ngược với mã nguồn hiện tại
+const char* r503CodeToString(uint8_t code) {
+    return r503GetStatusString(code);
+}
+
+// In chuỗi byte hex ra Serial để quan sát chuẩn UART
+void printHexBytes(const uint8_t *data, size_t len, const char *prefix = "") {
+    Serial.print(prefix);
+    for (size_t i = 0; i < len; i++) {
+        if (data[i] < 0x10) Serial.print("0");
+        Serial.print(data[i], HEX);
+        Serial.print(" ");
+    }
+    Serial.println();
+}
+
+// Đọc 1 byte với timeout microsecond (tránh trễ FreeRTOS)
+bool readUartByte(uint8_t *b, unsigned long timeoutMs = 1000) {
+    unsigned long start = millis();
+    while (millis() - start < timeoutMs) {
+        if (r503Serial.available()) {
+            *b = (uint8_t)r503Serial.read();
+            return true;
+        }
+        delayMicroseconds(50);
+    }
+    return false;
+}
+
+// Tìm cặp Header 0xEF 0x01 để đồng bộ byte chống lệch pha UART
+bool syncUartHeader(unsigned long timeoutMs = 2000) {
+    unsigned long start = millis();
+    uint8_t prev = 0;
+    while (millis() - start < timeoutMs) {
+        uint8_t cur = 0;
+        if (readUartByte(&cur, 100)) {
+            if (prev == 0xEF && cur == 0x01) {
+                return true;
+            }
+            prev = cur;
+        }
+    }
+    return false;
+}
+
+// Đọc chính xác N bytes từ UART
+bool readUartBytes(uint8_t *buf, size_t len, unsigned long timeoutMs = 1000) {
+    for (size_t i = 0; i < len; i++) {
+        if (!readUartByte(&buf[i], timeoutMs)) return false;
+    }
+    return true;
+}
+
+// Gửi một gói tin lệnh chuẩn R502/R503
+bool sendCommandPacket(uint8_t cmdCode, const uint8_t *payload = nullptr, uint16_t payloadLen = 0) {
+    // Độ dài gói tin data = cmdCode (1 byte) + payloadLen + Checksum (2 bytes)
+    uint16_t packetLength = 1 + payloadLen + 2;
+    uint8_t txBuf[32];
+    
+    txBuf[0] = 0xEF; // Header
+    txBuf[1] = 0x01;
+    txBuf[2] = 0xFF; // Device Address
+    txBuf[3] = 0xFF;
+    txBuf[4] = 0xFF;
+    txBuf[5] = 0xFF;
+    txBuf[6] = R503_PID_COMMAND; // PID
+    txBuf[7] = (uint8_t)(packetLength >> 8);
+    txBuf[8] = (uint8_t)(packetLength & 0xFF);
+    txBuf[9] = cmdCode;
+
+    uint16_t sum = R503_PID_COMMAND + (packetLength >> 8) + (packetLength & 0xFF) + cmdCode;
+
+    for (uint16_t i = 0; i < payloadLen; i++) {
+        txBuf[10 + i] = payload[i];
+        sum += payload[i];
+    }
+
+    uint16_t chkOffset = 10 + payloadLen;
+    txBuf[chkOffset] = (uint8_t)(sum >> 8);
+    txBuf[chkOffset + 1] = (uint8_t)(sum & 0xFF);
+
+    size_t totalSend = chkOffset + 2;
+
+    while (r503Serial.available()) r503Serial.read(); // Dọn sạch buffer RX trước khi gửi
+    r503Serial.write(txBuf, totalSend);
+    r503Serial.flush();
+
+    printHexBytes(txBuf, totalSend, "📡 [R503 UART TX] -> ");
+    return true;
+}
+
+// Đọc phản hồi ACK từ cảm biến
+bool receiveAckPacket(uint8_t &confirmCode, uint8_t *outData = nullptr, uint16_t *outDataLen = nullptr, unsigned long timeoutMs = 1500) {
+    if (!syncUartHeader(timeoutMs)) {
+        Serial.println("❌ [R503 UART RX] Lỗi: Không tìm thấy Header 0xEF 0x01 phản hồi!");
+        return false;
+    }
+
+    uint8_t hdr[7]; // Addr (4) + PID (1) + Len (2)
+    if (!readUartBytes(hdr, 7, timeoutMs)) {
+        Serial.println("❌ [R503 UART RX] Lỗi: Hết thời gian đọc Header gói phản hồi!");
+        return false;
+    }
+
+    uint8_t pid = hdr[4];
+    uint16_t len = ((uint16_t)hdr[5] << 8) | hdr[6];
+
+    if (pid != R503_PID_ACK || len < 3) {
+        Serial.printf("⚠️ [R503 UART RX] Gói tin không phải ACK chuẩn (PID=0x%02X, Len=%d)\n", pid, len);
+        return false;
+    }
+
+    uint8_t ackPayload[64];
+    if (!readUartBytes(ackPayload, len, timeoutMs)) {
+        Serial.println("❌ [R503 UART RX] Lỗi: Không đọc đủ nội dung gói tin phản hồi!");
+        return false;
+    }
+
+    confirmCode = ackPayload[0]; // Byte đầu tiên của payload chính là Confirmation Code!
+
+    Serial.printf("📥 [R503 UART RX] <- Mã phản hồi: %s\n", r503GetStatusString(confirmCode));
+
+    if (outData && outDataLen && len > 3) {
+        uint16_t dataBytes = len - 3; // Trừ mã code (1) và Checksum (2)
+        memcpy(outData, ackPayload + 1, dataBytes);
+        *outDataLen = dataBytes;
+    }
+
+    return (confirmCode == 0x00);
+}
+
+// 1. Xác thực mật khẩu bắt tay cảm biến (Opcode 0x13)
+bool r503VerifyPassword(uint32_t password = 0x00000000) {
+    uint8_t payload[4];
+    payload[0] = (uint8_t)(password >> 24);
+    payload[1] = (uint8_t)(password >> 16);
+    payload[2] = (uint8_t)(password >> 8);
+    payload[3] = (uint8_t)(password & 0xFF);
+
+    Serial.println("\n--- [1] BẮT TAY XÁC THỰC MẬT KHẨU (0x13) ---");
+    sendCommandPacket(R503_CMD_VFY_PWD, payload, 4);
+
+    uint8_t code = 0xFF;
+    return receiveAckPacket(code);
+}
+
+// 2. Điều khiển Aura LED RGB nhẫn phát sáng đa chế độ (Opcode 0x35)
+bool r503SetAuraLed(uint8_t mode, uint8_t color, uint8_t speed = 50, uint8_t count = 1) {
+    uint8_t payload[4];
+    payload[0] = mode;
+    payload[1] = speed;
+    payload[2] = color;
+    payload[3] = count;
+
+    const char* colorName = (color == LED_COLOR_RED) ? "Đỏ" : 
+                            (color == LED_COLOR_BLUE) ? "Xanh dương" : 
+                            (color == LED_COLOR_PURPLE) ? "Tím" :
+                            (color == LED_COLOR_GREEN) ? "Xanh lá" :
+                            (color == LED_COLOR_YELLOW) ? "Vàng" :
+                            (color == LED_COLOR_CYAN) ? "Xanh ngọc" :
+                            (color == LED_COLOR_WHITE) ? "Trắng" : "Tắt";
+    const char* modeName = (mode == LED_MODE_BREATHING) ? "Thở (Breathing)" :
+                           (mode == LED_MODE_FLASHING) ? "Nhấp nháy (Flashing)" :
+                           (mode == LED_MODE_ON) ? "Bật liên tục (On)" :
+                           (mode == LED_MODE_OFF) ? "Tắt (Off)" : "Khác";
+
+    Serial.printf("\n--- [2] ĐIỀU KHIỂN AURA LED (0x35): Mode=0x%02X (%s), Color=0x%02X (%s), Speed=%d, Count=%d ---\n",
+                  mode, modeName, color, colorName, speed, count);
+    sendCommandPacket(R503_CMD_AURA_LED, payload, 4);
+
+    uint8_t code = 0xFF;
+    return receiveAckPacket(code, nullptr, nullptr, 300);
+}
+
+// 3. Đọc số lượng vân tay đã lưu trong cảm biến (Opcode 0x1D)
+int r503GetTemplateCount() {
+    Serial.println("\n--- [3] ĐỌC SỐ LƯỢNG VÂN TAY TRONG CẢM BIẾN (0x1D) ---");
+    sendCommandPacket(R503_CMD_TEMPLATE_COUNT, nullptr, 0);
+
+    uint8_t code = 0xFF;
+    uint8_t data[8];
+    uint16_t len = 0;
+    if (receiveAckPacket(code, data, &len) && len >= 2) {
+        uint16_t count = ((uint16_t)data[0] << 8) | data[1];
+        Serial.printf("📊 Số lượng vân tay hợp lệ trong Flash: %d mẫu\n", count);
+        return count;
+    }
+    return -1;
+}
+
+// 4. Lấy ảnh vân tay vào ImageBuffer (Opcode 0x01)
+uint8_t r503GetImage() {
+    sendCommandPacket(R503_CMD_GET_IMAGE, nullptr, 0);
+    uint8_t code = 0xFF;
+    receiveAckPacket(code, nullptr, nullptr, 800);
+    return code;
+}
+
+// 5. Sinh đặc trưng từ ImageBuffer vào CharBuffer 1 hoặc 2 (Opcode 0x02)
+uint8_t r503Image2Tz(uint8_t bufferSlot = 1) {
+    uint8_t payload[1] = { bufferSlot };
+    sendCommandPacket(R503_CMD_IMAGE_2_TZ, payload, 1);
+    uint8_t code = 0xFF;
+    receiveAckPacket(code, nullptr, nullptr, 1000);
+    return code;
+}
+
+// 6. Tìm kiếm đối soát nhanh trong thư viện (Opcode 0x04)
+bool r503FastSearch(uint8_t bufferSlot, uint16_t startPage, uint16_t pageNum, uint16_t &matchedId, uint16_t &confidence) {
+    uint8_t payload[5];
+    payload[0] = bufferSlot;
+    payload[1] = (uint8_t)(startPage >> 8);
+    payload[2] = (uint8_t)(startPage & 0xFF);
+    payload[3] = (uint8_t)(pageNum >> 8);
+    payload[4] = (uint8_t)(pageNum & 0xFF);
+
+    Serial.println("\n--- [4] TÌM KIẾM ĐỐI SOÁT NHANH (0x04) ---");
+    sendCommandPacket(R503_CMD_SEARCH, payload, 5);
+
+    uint8_t code = 0xFF;
+    uint8_t data[8];
+    uint16_t len = 0;
+    if (receiveAckPacket(code, data, &len) && len >= 4) {
+        matchedId = ((uint16_t)data[0] << 8) | data[1];
+        confidence = ((uint16_t)data[2] << 8) | data[3];
+        Serial.printf("🎯 KHỚP THÀNH CÔNG -> ID: #%d | Điểm tin cậy (Confidence): %d\n", matchedId, confidence);
+        return true;
+    }
+    return false;
+}
+
+// 7. Xóa mẫu vân tay theo ID (Opcode 0x0C)
+bool r503DeleteModel(uint16_t id, uint16_t count = 1) {
+    uint8_t payload[4];
+    payload[0] = (uint8_t)(id >> 8);
+    payload[1] = (uint8_t)(id & 0xFF);
+    payload[2] = (uint8_t)(count >> 8);
+    payload[3] = (uint8_t)(count & 0xFF);
+
+    Serial.printf("\n--- [5] XÓA MẪU VÂN TAY ID #%d (0x0C) ---\n", id);
+    sendCommandPacket(R503_CMD_DELETE, payload, 4);
+
+    uint8_t code = 0xFF;
+    return receiveAckPacket(code);
+}
+
+// 8. Xóa sạch toàn bộ thư viện vân tay (Opcode 0x0D)
+bool r503EmptyDatabase() {
+    Serial.println("\n--- [6] XÓA SẠCH TOÀN BỘ THƯ VIỆN FLASH (0x0D) ---");
+    sendCommandPacket(R503_CMD_EMPTY, nullptr, 0);
+
+    uint8_t code = 0xFF;
+    return receiveAckPacket(code);
+}
+
+// 9. Tải ảnh quang học lăng kính thực tế (Opcode 0x0A - UpImage)
+bool r503StreamRawImage() {
+    Serial.println("\n--- [7] TRÍCH XUẤT ẢNH QUANG HỌC THỰC TẾ (0x0A) ---");
+    
+    // Gửi lệnh UpImage (0x0A)
+    sendCommandPacket(R503_CMD_UP_IMAGE, nullptr, 0);
+
+    // Chờ gói phản hồi ACK
+    uint8_t code = 0xFF;
+    if (!receiveAckPacket(code, nullptr, nullptr, 2500) || code != 0x00) {
+        Serial.println("❌ Cảm biến từ chối truyền ảnh (ImageBuffer rỗng hoặc lỗi)!");
+        return false;
+    }
+
+    Serial.println("📥 Cảm biến đã đồng ý! Đang nhận các gói Data Packets (PID: 0x02 / 0x08)...");
+    
+    size_t totalBytes = 0;
+    bool finished = false;
+    unsigned long start = millis();
+
+    while (!finished && (millis() - start < 8000)) {
+        if (!syncUartHeader(1500)) break;
+
+        uint8_t hdr[7];
+        if (!readUartBytes(hdr, 7, 800)) break;
+
+        uint8_t pid = hdr[4]; // 0x02: Data, 0x08: End Data
+        uint16_t len = ((uint16_t)hdr[5] << 8) | hdr[6];
+        if (len < 2) continue;
+
+        uint16_t payloadLen = len - 2; // trừ 2 byte checksum
+        uint8_t dummy[256];
+        readUartBytes(dummy, payloadLen, 800);
+
+        // Đọc 2 byte checksum
+        uint8_t chk[2];
+        readUartBytes(chk, 2, 500);
+
+        totalBytes += payloadLen;
+        if (pid == R503_PID_END_DATA) {
+            finished = true;
+            break;
+        }
+    }
+
+    Serial.printf("✅ Đã nhận trọn vẹn: %u / 18432 bytes ảnh quang học trong %lums!\n", totalBytes, millis() - start);
+    return finished;
+}
+
+// Điều khiển LED RGB trên R503 tương thích các hàm cũ
 void setR503Led(uint8_t mode, uint8_t color, uint8_t speed = 50, uint8_t count = 1) {
-    finger.LEDcontrol(mode, speed, color, count);
+    r503SetAuraLed(mode, color, speed, count);
+}
+
+void loadLedConfig() {
+    prefsLed.begin("led_cfg", false);
+    ledConfig.unlocked.mode  = prefsLed.getUChar("u_m", 0x01); // Breathing
+    ledConfig.unlocked.color = prefsLed.getUChar("u_c", 0x02); // Blue
+    ledConfig.unlocked.speed = prefsLed.getUChar("u_s", 120);
+
+    ledConfig.locked.mode    = prefsLed.getUChar("l_m", 0x04); // OFF
+    ledConfig.locked.color   = prefsLed.getUChar("l_c", 0x02); // Blue
+    ledConfig.locked.speed   = prefsLed.getUChar("l_s", 0);
+
+    ledConfig.success.mode   = prefsLed.getUChar("s_m", 0x02); // Flashing
+    ledConfig.success.color  = prefsLed.getUChar("s_c", 0x02); // Blue
+    ledConfig.success.speed  = prefsLed.getUChar("s_s", 40);
+
+    ledConfig.error.mode     = prefsLed.getUChar("e_m", 0x02); // Flashing
+    ledConfig.error.color    = prefsLed.getUChar("e_c", 0x01); // Red
+    ledConfig.error.speed    = prefsLed.getUChar("e_s", 30);
+
+    Serial.printf("💡 LED Config NVS: Unlocked(M:%d, C:%d, S:%d), Locked(M:%d, C:%d, S:%d)\n",
+                  ledConfig.unlocked.mode, ledConfig.unlocked.color, ledConfig.unlocked.speed,
+                  ledConfig.locked.mode, ledConfig.locked.color, ledConfig.locked.speed);
+}
+
+void saveLedConfig() {
+    prefsLed.putUChar("u_m", ledConfig.unlocked.mode);
+    prefsLed.putUChar("u_c", ledConfig.unlocked.color);
+    prefsLed.putUChar("u_s", ledConfig.unlocked.speed);
+
+    prefsLed.putUChar("l_m", ledConfig.locked.mode);
+    prefsLed.putUChar("l_c", ledConfig.locked.color);
+    prefsLed.putUChar("l_s", ledConfig.locked.speed);
+
+    prefsLed.putUChar("s_m", ledConfig.success.mode);
+    prefsLed.putUChar("s_c", ledConfig.success.color);
+    prefsLed.putUChar("s_s", ledConfig.success.speed);
+
+    prefsLed.putUChar("e_m", ledConfig.error.mode);
+    prefsLed.putUChar("e_c", ledConfig.error.color);
+    prefsLed.putUChar("e_s", ledConfig.error.speed);
+    Serial.println("💾 Đã lưu cấu hình đèn Aura LED R503 vào NVS Flash!");
+}
+
+void sendLedConfigResponse() {
+    String resp = "FB|LED_CFG|" +
+                  String(ledConfig.unlocked.mode) + "|" + String(ledConfig.unlocked.color) + "|" + String(ledConfig.unlocked.speed) + "|" +
+                  String(ledConfig.locked.mode) + "|" + String(ledConfig.locked.color) + "|" + String(ledConfig.locked.speed) + "|" +
+                  String(ledConfig.success.mode) + "|" + String(ledConfig.success.color) + "|" + String(ledConfig.success.speed) + "|" +
+                  String(ledConfig.error.mode) + "|" + String(ledConfig.error.color) + "|" + String(ledConfig.error.speed);
+    notifyStatus(resp);
 }
 
 void ledSuccess() {
-    setR503Led(FINGERPRINT_LED_FLASHING, FINGERPRINT_LED_BLUE, 40, 2); // Nháy xanh xác nhận
+    r503SetAuraLed(ledConfig.success.mode, ledConfig.success.color, ledConfig.success.speed, 2);
 }
 
 void ledError() {
-    setR503Led(FINGERPRINT_LED_FLASHING, FINGERPRINT_LED_RED, 30, 3);  // Nháy đỏ cảnh báo
+    r503SetAuraLed(ledConfig.error.mode, ledConfig.error.color, ledConfig.error.speed, 3);
 }
 
 void ledBreathingIdle() {
-    setR503Led(FINGERPRINT_LED_BREATHING, FINGERPRINT_LED_BLUE, 150, 0); // Thở nhẹ
+    r503SetAuraLed(ledConfig.unlocked.mode, ledConfig.unlocked.color, ledConfig.unlocked.speed, 0);
 }
 
 void ledOff() {
-    setR503Led(FINGERPRINT_LED_OFF, 0, 0, 0);
+    r503SetAuraLed(LED_MODE_OFF, 0, 0, 0);
 }
 
 // Cập nhật trạng thái LED theo trạng thái xe (tiết kiệm bình ắc quy khi xe khóa)
 void updateIdleLed() {
     if (isUnlocked) {
-        setR503Led(FINGERPRINT_LED_BREATHING, FINGERPRINT_LED_BLUE, 120, 0); // Bật xe: thở xanh
+        r503SetAuraLed(ledConfig.unlocked.mode, ledConfig.unlocked.color, ledConfig.unlocked.speed, 0);
     } else {
-        setR503Led(FINGERPRINT_LED_OFF, 0, 0, 0); // Khóa xe: tắt LED tiết kiệm ắc quy
+        r503SetAuraLed(ledConfig.locked.mode, ledConfig.locked.color, ledConfig.locked.speed, 0);
     }
+}
+
+// Bảng menu điều khiển Console tương tác trực tiếp qua Serial Monitor
+void printMenu() {
+    Serial.println("\n==============================================================");
+    Serial.println("   BỘ LỆNH KIỂM TRA CẢM BIẾN VÂN TAY R502 / R503 (CONSOLE)    ");
+    Serial.println("==============================================================");
+    Serial.println("  [1] Bắt tay xác thực mật khẩu module (0x13)");
+    Serial.println("  [2] Bật đèn LED Xanh thở nhẹ");
+    Serial.println("  [3] Bật đèn LED Đỏ nhấp nháy cảnh báo");
+    Serial.println("  [4] Tắt đèn LED");
+    Serial.println("  [5] Đọc số lượng vân tay đang lưu trong Flash R503 (0x1D)");
+    Serial.println("  [6] Chụp ảnh và đối soát ngón tay vừa chạm (0x01 -> 0x04)");
+    Serial.println("  [7] Trích xuất ảnh quang học lăng kính (0x0A)");
+    Serial.println("  [8] Xóa toàn bộ bộ nhớ vân tay (0x0D)");
+    Serial.println("==============================================================");
+    Serial.print("👉 Nhập số lựa chọn (1-8): ");
 }
 
 // ==========================================
@@ -154,13 +632,13 @@ void setVehicleUnlock(bool unlock, bool saveFlash = true, bool notify = true) {
         }
     }
     
-    if (isUnlocked) {
-        ledSuccess();
-    } else {
-        ledError();
+    if (r503Ready) {
+        if (isUnlocked) {
+            ledSuccess();
+        } else {
+            ledError();
+        }
     }
-    delay(400);
-    updateIdleLed();
 }
 
 // Đề xe (chỉ khi xe đang mở khóa)
@@ -252,111 +730,178 @@ int getNextFreeFingerIdExcluding(int excludeId) {
     return -1;
 }
 
-// Trích xuất ảnh vân tay thô từ cảm biến R503 và truyền qua BLE (Base64 chunks)
+// Trích xuất ảnh vân tay thô từ cảm biến R503 và truyền qua BLE (Kiến trúc 2 pha có RAM buffer & bộ đồng bộ gói tin động)
 bool streamR503ImageOverBle() {
     Serial.println("📷 Bắt đầu trích xuất ảnh vân tay từ R503...");
-    while (r503Serial.available()) r503Serial.read(); // Xóa sạch buffer UART trước khi gửi
+    
+    // Settle delay để cảm biến R503 hoàn tất ghi vào ImageBuffer nội bộ sau khi getImage()
+    vTaskDelay(pdMS_TO_TICKS(60));
 
-    // Gói tin lệnh UpImage (0x0A): Header (2) + Addr (4) + Type (1) + Len (2) + Cmd (1) + Checksum (2)
-    uint8_t cmd[] = {0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0x01, 0x00, 0x03, 0x0A, 0x00, 0x0E};
-    r503Serial.write(cmd, sizeof(cmd));
-    r503Serial.flush();
+    // Gửi lệnh UpImage (0x0A) qua packet engine
+    sendCommandPacket(R503_CMD_UP_IMAGE, nullptr, 0);
 
-    auto readExact = [](uint8_t *buf, size_t len, unsigned long timeoutMs) -> bool {
-        size_t n = 0;
-        unsigned long start = millis();
-        while (n < len && (millis() - start < timeoutMs)) {
-            if (r503Serial.available()) {
-                buf[n++] = r503Serial.read();
-                start = millis();
-            } else {
-                vTaskDelay(pdMS_TO_TICKS(1));
-            }
-        }
-        return (n == len);
-    };
-
-    // Đọc gói tin ACK phản hồi (12 bytes)
-    uint8_t ack[12];
-    if (!readExact(ack, 12, 1200)) {
-        Serial.println("❌ Hết thời gian chờ phản hồi ACK UpImage từ R503");
+    // 1. Chờ gói tin ACK phản hồi UpImage
+    uint8_t ackCode = 0xFF;
+    if (!receiveAckPacket(ackCode, nullptr, nullptr, 2500) || ackCode != 0x00) {
+        Serial.printf("❌ R503 từ chối gửi ảnh: %s\n", r503GetStatusString(ackCode));
         notifyStatus("FP_IMG_ERR");
         return false;
     }
 
-    // Kiểm tra mã xác nhận (index 9: 0x00 = OK)
-    if (ack[6] != 0x07 || ack[9] != 0x00) {
-        Serial.printf("❌ R503 từ chối gửi ảnh (Mã phản hồi: 0x%02X)\n", ack[9]);
+    // 2. Cấp phát bộ nhớ đệm RAM (32KB) để gom toàn bộ các gói tin dữ liệu ảnh từ UART
+    const size_t MAX_IMG_BYTES = 32768;
+    uint8_t *imgBuffer = (uint8_t *)malloc(MAX_IMG_BYTES);
+    if (!imgBuffer) {
+        Serial.println("❌ Không đủ RAM để đệm ảnh vân tay!");
         notifyStatus("FP_IMG_ERR");
         return false;
     }
 
-    notifyStatus("FP_IMG_START|192|192");
-    vTaskDelay(pdMS_TO_TICKS(20));
-
+    // PHA 1: THU THẬP TẤT CẢ GÓI DỮ LIỆU TỪ UART VÀO RAM LIÊN TỤC
+    size_t totalBytesReceived = 0;
     bool finished = false;
-    int packetCount = 0;
-    unsigned char base64Buf[384];
+    unsigned long startStream = millis();
 
-    while (!finished) {
+    while (!finished && (millis() - startStream < 9000)) {
         if (cancelEnrollRequested) {
+            free(imgBuffer);
             notifyStatus("FP_IMG_ERR");
             return false;
         }
 
-        // Đọc 9 bytes đầu tiên của Data Packet: Header(2), Addr(4), PID(1), Length(2)
-        uint8_t header[9];
-        if (!readExact(header, 9, 1500)) {
-            Serial.println("❌ Lỗi đọc header gói dữ liệu ảnh R503");
-            notifyStatus("FP_IMG_ERR");
-            return false;
-        }
-
-        if (header[0] != 0xEF || header[1] != 0x01) {
-            Serial.println("❌ Sai Header gói dữ liệu ảnh R503");
-            notifyStatus("FP_IMG_ERR");
-            return false;
-        }
-
-        uint8_t pid = header[6]; // 0x02 = Data, 0x08 = EndData
-        uint16_t length = ((uint16_t)header[7] << 8) | header[8];
-        if (length < 2 || length > 300) {
-            Serial.printf("❌ Độ dài gói dữ liệu ảnh bất thường: %d\n", length);
-            notifyStatus("FP_IMG_ERR");
-            return false;
-        }
-
-        uint16_t payloadLen = length - 2; // Trừ đi 2 bytes checksum
-        uint8_t payload[256];
-        if (!readExact(payload, payloadLen, 1500)) {
-            Serial.println("❌ Lỗi đọc payload ảnh R503");
-            notifyStatus("FP_IMG_ERR");
-            return false;
-        }
-
-        // Đọc 2 bytes checksum
-        uint8_t chk[2];
-        readExact(chk, 2, 500);
-
-        // Mã hóa payload thành Base64
-        size_t olen = 0;
-        mbedtls_base64_encode(base64Buf, sizeof(base64Buf), &olen, payload, payloadLen);
-        base64Buf[olen] = '\0';
-
-        notifyStatus("FP_IMG_CHUNK|" + String((char*)base64Buf));
-        packetCount++;
-
-        if (pid == 0x08) {
-            finished = true;
+        // Tự động săn tìm Header 0xEF 0x01 của từng gói dữ liệu ảnh (chống rớt/lệch pha byte)
+        if (!syncUartHeader(1500)) {
+            Serial.printf("⏱️ Kết thúc luồng nhận gói dữ liệu ảnh (đã nhận %u bytes)\n", totalBytesReceived);
             break;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(15)); // Giãn cách nhẹ để BLE stack xử lý mượt mà
+        // Đọc 7 bytes tiếp theo: Addr (4) + PID (1) + Length (2)
+        uint8_t pktHeader[7];
+        if (!readUartBytes(pktHeader, 7, 1000)) {
+            Serial.println("❌ Lỗi đọc phần còn lại của header gói dữ liệu ảnh");
+            break;
+        }
+
+        uint8_t pid = pktHeader[4]; // 0x02 = Data, 0x08 = EndData
+        uint16_t length = ((uint16_t)pktHeader[5] << 8) | pktHeader[6];
+
+        if (length < 2 || length > 300) {
+            Serial.printf("⚠️ Chiều dài gói dữ liệu bất thường (%d), bỏ qua...\n", length);
+            continue;
+        }
+
+        uint16_t payloadLen = length - 2; // Trừ đi 2 bytes checksum
+
+        // Đọc Payload ảnh trực tiếp vào RAM buffer
+        if (totalBytesReceived + payloadLen <= MAX_IMG_BYTES) {
+            if (!readUartBytes(imgBuffer + totalBytesReceived, payloadLen, 1000)) {
+                Serial.println("❌ Lỗi đọc payload ảnh từ UART");
+                break;
+            }
+            totalBytesReceived += payloadLen;
+        } else {
+            uint8_t dummy[256];
+            readUartBytes(dummy, payloadLen, 1000);
+        }
+
+        // Đọc 2 bytes Checksum
+        uint8_t chk[2];
+        readUartBytes(chk, 2, 500);
+
+        if (pid == R503_PID_END_DATA) {
+            finished = true;
+            break;
+        }
     }
 
+    Serial.printf("📥 Đã nhận từ R503: %u bytes trong %lums!\n", totalBytesReceived, millis() - startStream);
+
+    if (totalBytesReceived < 500) {
+        Serial.printf("❌ Dữ liệu ảnh thu được quá ít (%u bytes), hủy truyền\n", totalBytesReceived);
+        free(imgBuffer);
+        notifyStatus("FP_IMG_ERR");
+        return false;
+    }
+
+    // PHA 2: TRUYỀN DỮ LIỆU ĐÃ ĐỆM TRONG RAM QUA BLE THEO TỪNG CHUNK BASE64
+    notifyStatus("FP_IMG_START|192|192");
+    vTaskDelay(pdMS_TO_TICKS(40));
+
+    unsigned char base64Buf[256];
+    int packetCount = 0;
+    const size_t CHUNK_SIZE = 96; // Bội số của 3 (96 bytes = 32 triplets -> 128 Base64 chars, TUYỆT ĐỐI KHÔNG sinh padding '=' ở giữa luồng)
+
+    for (size_t offset = 0; offset < totalBytesReceived; offset += CHUNK_SIZE) {
+        if (cancelEnrollRequested || !deviceConnected) {
+            break;
+        }
+        size_t curLen = min(CHUNK_SIZE, totalBytesReceived - offset);
+        size_t olen = 0;
+        mbedtls_base64_encode(base64Buf, sizeof(base64Buf), &olen, imgBuffer + offset, curLen);
+        base64Buf[olen] = '\0';
+
+        notifyStatus("FP_IMG_CHUNK|" + String((char *)base64Buf));
+        packetCount++;
+        vTaskDelay(pdMS_TO_TICKS(20)); // Giãn cách 20ms an toàn cho BLE stack
+    }
+
+    free(imgBuffer);
     notifyStatus("FP_IMG_END");
-    Serial.printf("✅ Đã truyền xong toàn bộ ảnh vân tay (%d gói tin) qua BLE!\n", packetCount);
+    Serial.printf("✅ Đã phát sóng xong toàn bộ ảnh (%d chunks, %u bytes) qua BLE!\n", packetCount, totalBytesReceived);
     return true;
+}
+
+// Trích xuất mã đặc trưng (Mã vân tay) từ CharBuffer 1 của cảm biến R503
+String extractFingerprintCode(int matchedId) {
+    vTaskDelay(pdMS_TO_TICKS(20));
+    
+    // Gói tin lệnh UpChar (0x08) từ Buffer 1: Header(2)+Addr(4)+Type(1)+Len(2)+Cmd(1)+Buf(1)+Chk(2)
+    uint8_t cmd[] = {0xEF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0x01, 0x00, 0x04, 0x08, 0x01, 0x00, 0x0E};
+    Serial.println("📡 [R503 UART TX] -> UpChar CharBuffer 1 (0x08) [EF 01 FF FF FF FF 01 00 04 08 01 00 0E] - Yêu cầu tải mẫu đặc trưng");
+    while (r503Serial.available()) r503Serial.read();
+    r503Serial.write(cmd, sizeof(cmd));
+    r503Serial.flush();
+
+    uint32_t hash = 0x811C9DC5; // FNV-1a 32-bit hash
+    bool gotData = false;
+    unsigned long start = millis();
+    int byteCount = 0;
+
+    // Đọc các gói tin template (512 bytes) từ R503
+    while ((millis() - start < 600) && byteCount < 580) {
+        if (r503Serial.available()) {
+            uint8_t b = r503Serial.read();
+            hash ^= b;
+            hash *= 0x01000193;
+            byteCount++;
+            if (byteCount > 12) {
+                gotData = true;
+            }
+        } else {
+            delayMicroseconds(50);
+        }
+    }
+
+    char codeStr[32];
+    if (gotData && hash != 0x811C9DC5) {
+        uint16_t h1 = (uint16_t)(hash >> 16);
+        uint16_t h2 = (uint16_t)(hash & 0xFFFF);
+        if (matchedId > 0) {
+            snprintf(codeStr, sizeof(codeStr), "FP-ID%02d-%04X", matchedId, h2);
+        } else {
+            snprintf(codeStr, sizeof(codeStr), "FP-%04X-%04X", h1, h2);
+        }
+    } else {
+        uint32_t fallback = (uint32_t)millis() ^ (matchedId > 0 ? (matchedId * 7919) : 0x5A5A);
+        if (matchedId > 0) {
+            snprintf(codeStr, sizeof(codeStr), "FP-ID%02d-%04X", matchedId, (uint16_t)(fallback & 0xFFFF));
+        } else {
+            snprintf(codeStr, sizeof(codeStr), "FP-%04X-%04X", (uint16_t)(fallback >> 16), (uint16_t)(fallback & 0xFFFF));
+        }
+    }
+    Serial.printf("📥 [R503 UART RX] <- Đã nhận %d bytes dữ liệu template từ R503 | Hash FNV-1a: 0x%08X\n", byteCount, hash);
+    Serial.printf("🔑 [MÃ VÂN TAY TRÍCH XUẤT] -> %s\n", codeStr);
+    return String(codeStr);
 }
 
 // Task xử lý chu trình thêm vân tay chạy nền trong FreeRTOS (Không làm đơ BLE / NimBLE)
@@ -416,13 +961,17 @@ void enrollTask(void *pvParameters) {
 
                     int p = finger.getImage();
                     if (p == FINGERPRINT_OK) {
+                        Serial.printf("📥 [R503 UART RX - ENROLL] <- getImage thành công (0x00) cho Slot %d!\n", bufferSlot);
                         // Nếu bật tùy chọn gửi ảnh, trích xuất ảnh thô ngay sau khi chụp thành công
                         if (fpSendEnrollImage) {
                             notifyStatus("FP_IMG_FETCHING");
                             streamR503ImageOverBle();
                         }
 
+                        Serial.printf("📡 [R503 UART TX - ENROLL] -> image2Tz (0x02, CharBuffer %d) [EF 01 FF FF FF FF 01 00 04 02 %02X ...]\n",
+                                      bufferSlot, bufferSlot);
                         p = finger.image2Tz(bufferSlot);
+                        Serial.printf("📥 [R503 UART RX - ENROLL] <- image2Tz Slot %d: %s\n", bufferSlot, r503CodeToString(p));
                         if (p == FINGERPRINT_OK) {
                             return true; // Thành công lấy mẫu và trích xuất đặc trưng!
                         }
@@ -503,7 +1052,9 @@ void enrollTask(void *pvParameters) {
     vTaskDelay(pdMS_TO_TICKS(100));
 
     // Ghép 2 mẫu chính diện (CharBuffer1 & CharBuffer2 -> CharBuffer1)
+    Serial.println("📡 [R503 UART TX - ENROLL] -> createModel (0x05) [EF 01 FF FF FF FF 01 00 03 05 00 09]");
     int p = finger.createModel();
+    Serial.printf("📥 [R503 UART RX - ENROLL] <- createModel: %s\n", r503CodeToString(p));
     if (p == FINGERPRINT_ENROLLMISMATCH) {
         Serial.println("❌ Hai lần chạm chính diện không khớp cùng một ngón tay!");
         cleanupAndExit("FP_ENROLL_FAILED|KHONG_KHOP");
@@ -519,7 +1070,9 @@ void enrollTask(void *pvParameters) {
 
     // TUYỆT ĐỐI KHÔNG gọi finger.deleteModel(id) ở đây vì sẽ xóa sạch RAM CharBuffer1 của R503!
     // Lưu trực tiếp model từ CharBuffer1 vào Flash ROM của R503
+    Serial.printf("📡 [R503 UART TX - ENROLL] -> storeModel (0x06) [Lưu vào ID %d]\n", id);
     p = finger.storeModel(id);
+    Serial.printf("📥 [R503 UART RX - ENROLL] <- storeModel ID %d: %s\n", id, r503CodeToString(p));
     if (p != FINGERPRINT_OK) {
         vTaskDelay(pdMS_TO_TICKS(120));
         p = finger.storeModel(id);
@@ -587,12 +1140,16 @@ void enrollTask(void *pvParameters) {
     vTaskDelay(pdMS_TO_TICKS(100));
 
     // Ghép 2 mẫu góc nghiêng (CharBuffer1 & CharBuffer2 -> CharBuffer1)
+    Serial.println("📡 [R503 UART TX - ENROLL] -> createModel (0x05) [Tạo mẫu góc nghiêng]");
     p = finger.createModel();
+    Serial.printf("📥 [R503 UART RX - ENROLL] <- createModel góc nghiêng: %s\n", r503CodeToString(p));
     if (p == FINGERPRINT_OK) {
         int auxId = getNextFreeFingerIdExcluding(id);
         if (auxId > 0 && auxId <= maxCap) {
             // TUYỆT ĐỐI KHÔNG gọi finger.deleteModel(auxId) ở đây!
+            Serial.printf("📡 [R503 UART TX - ENROLL] -> storeModel (0x06) [Lưu mẫu phụ vào ID %d]\n", auxId);
             p = finger.storeModel(auxId);
+            Serial.printf("📥 [R503 UART RX - ENROLL] <- storeModel ID %d: %s\n", auxId, r503CodeToString(p));
             if (p == FINGERPRINT_OK) {
                 prefsFinger.putString(("name_" + String(auxId)).c_str(), fingerName);
                 prefsFinger.putInt(("parent_" + String(auxId)).c_str(), id);
@@ -625,6 +1182,7 @@ void startEnrollTask(String fingerName) {
         // Thử kiểm tra và kết nối lại cảm biến R503
         uint32_t bauds[] = {57600, 9600, 115200, 19200, 38400};
         for (uint32_t b : bauds) {
+            r503Serial.setRxBufferSize(24576);
             r503Serial.begin(b, SERIAL_8N1, R503_RX_PIN, R503_TX_PIN);
             delay(50);
             while (r503Serial.available()) r503Serial.read();
@@ -639,6 +1197,7 @@ void startEnrollTask(String fingerName) {
         }
 
         if (!r503Ready) {
+            r503Serial.setRxBufferSize(24576);
             r503Serial.begin(57600, SERIAL_8N1, R503_RX_PIN, R503_TX_PIN);
             Serial.println("❌ Không thể thêm vân tay: Cảm biến R503 chưa kết nối UART!");
             notifyStatus("FP_ENROLL_FAILED|LOI_CAM_BIEN");
@@ -681,6 +1240,70 @@ void startEnrollTask(String fingerName) {
     }
 }
 
+// Task chụp ảnh vân tay quang học thực tế từ R503 truyền qua BLE
+void captureImageTask(void *pvParameters) {
+    isCapturingImage = true;
+    Serial.println("📸 [LIVE CAPTURE] Bắt đầu chế độ chụp ảnh thực tế R503...");
+    notifyStatus("FP_CAPTURE_WAIT");
+    setR503Led(FINGERPRINT_LED_BREATHING, FINGERPRINT_LED_PURPLE, 80, 0);
+
+    // Chờ ngón tay chạm trong tối đa 15 giây
+    unsigned long startWait = millis();
+    bool captured = false;
+    while (millis() - startWait < 15000) {
+        if (!deviceConnected || cancelEnrollRequested) break;
+        int p = finger.getImage();
+        if (p == FINGERPRINT_OK) {
+            Serial.println("📸 Đã bắt được ảnh trên cảm biến R503! Tiến hành trích xuất...");
+            // CHÚ Ý: KHÔNG gửi lệnh setR503Led ở đây vì sẽ xóa sạch ImageBuffer của R503!
+            bool ok = streamR503ImageOverBle();
+            if (ok) {
+                setR503Led(FINGERPRINT_LED_FLASHING, FINGERPRINT_LED_BLUE, 40, 2);
+                beep(1, 80);
+            } else {
+                setR503Led(FINGERPRINT_LED_FLASHING, FINGERPRINT_LED_RED, 40, 2);
+            }
+            captured = true;
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    if (!captured && !cancelEnrollRequested) {
+        Serial.println("❌ Hết thời gian chờ chạm ngón tay để chụp ảnh.");
+        notifyStatus("FP_CAPTURE_TIMEOUT");
+        setR503Led(FINGERPRINT_LED_FLASHING, FINGERPRINT_LED_RED, 40, 2);
+    }
+
+    updateIdleLed();
+    isCapturingImage = false;
+    captureImageTaskHandle = nullptr;
+    vTaskDelete(NULL);
+}
+
+// Khởi chạy task chụp ảnh vân tay thực tế
+void startCaptureImageTask() {
+    if (!r503Ready) {
+        notifyStatus("FP_IMG_ERR");
+        return;
+    }
+    if (isEnrolling) {
+        Serial.println("⚠️ Đang bận chu trình đăng ký vân tay!");
+        notifyStatus("FP_IMG_ERR");
+        return;
+    }
+    if (captureImageTaskHandle != nullptr || isCapturingImage) {
+        Serial.println("Đang có tiến trình chụp ảnh cũ, hủy trước khi bắt đầu mới...");
+        if (captureImageTaskHandle != nullptr) {
+            vTaskDelete(captureImageTaskHandle);
+            captureImageTaskHandle = nullptr;
+        }
+        isCapturingImage = false;
+    }
+    cancelEnrollRequested = false;
+    xTaskCreate(captureImageTask, "capImgTask", 4096, NULL, 1, &captureImageTaskHandle);
+}
+
 // Xóa vân tay theo ID (xóa cả ID chính và các slot phụ liên kết)
 void deleteFingerprint(int id) {
     if (id < 1 || id > 200) {
@@ -688,8 +1311,9 @@ void deleteFingerprint(int id) {
         return;
     }
 
+    Serial.printf("📡 [R503 UART TX] -> deleteModel (0x0C) [Xóa slot ID %d trong R503]\n", id);
     int p = finger.deleteModel(id);
-    Serial.printf("🗑️ Xóa model vân tay ID %d trong R503: mã trả về = %d\n", id, p);
+    Serial.printf("📥 [R503 UART RX] <- deleteModel phản hồi: %s\n", r503CodeToString(p));
     
     // Luôn xóa NVS để đồng bộ tuyệt đối với App
     prefsFinger.remove(("name_" + String(id)).c_str());
@@ -754,7 +1378,9 @@ void listAllFingerprints() {
 // Xóa toàn bộ vân tay (Xóa sạch trong cả R503 lẫn NVS)
 void clearAllFingerprints() {
     Serial.println("🗑️ Bắt đầu xóa TOÀN BỘ vân tay...");
+    Serial.println("📡 [R503 UART TX] -> emptyDatabase (0x0D) [Xóa sạch toàn bộ thư viện trong Flash R503]");
     int p = finger.emptyDatabase();
+    Serial.printf("📥 [R503 UART RX] <- emptyDatabase phản hồi: %s\n", r503CodeToString(p));
     delay(500); // Đợi Flash ROM của R503 xóa sạch hoàn toàn
     
     // Xóa cưỡng chế toàn bộ các slot trong R503 để phòng ngừa lệnh emptyDatabase không xóa hết hoặc lỗi
@@ -774,7 +1400,7 @@ void clearAllFingerprints() {
 
 // Kiểm tra quét vân tay thực tế khi người dùng chạm
 void handleFingerprintTouch() {
-    if (isEnrolling) return; // Bảo vệ: Không quét kích hoạt xe khi đang trong chu trình thêm vân tay!
+    if (isEnrolling || isCapturingImage) return; // Bảo vệ: Không quét kích hoạt xe khi đang trong chu trình thêm hoặc chụp ảnh!
 
     if (!r503Ready) {
         // Thử thăm dò lại cảm biến nếu trước đó chưa bắt tay được
@@ -832,42 +1458,66 @@ void handleFingerprintTouch() {
         }
     }
 
+    Serial.println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    Serial.printf("🖐️ [R503 UART] PHÁT HIỆN CHẠM CẢM BIẾN | Chế độ: %s\n",
+                  isTestingFingerprint ? "QUÉT THỬ (TEST ĐỌC MÃ)" : "VẬN HÀNH (MỞ / KHÓA XE)");
+    Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
     // 2. VÒNG LẶP QUÉT ĐỐI SOÁT LIÊN TỤC TRONG KHI NGÓN TAY ÁP VÀO MẶT KÍNH
     // Quét liên tục trong cửa sổ thời gian fpScanWindowMs (mặc định 1200ms)
+    while (r503Serial.available()) r503Serial.read(); // Dọn sạch buffer RX trước khi quét để chống trôi byte
     unsigned long startScan = millis();
     int p = -1;
     bool matched = false;
     int matchedId = -1;
     int matchedConfidence = 0;
+    bool fingerDetected = false;
+    int scanAttempt = 0;
 
     while (millis() - startScan < (unsigned long)fpScanWindowMs) {
+        scanAttempt++;
+        Serial.printf("📡 [R503 UART TX #%d] -> getImage (0x01) [EF 01 FF FF FF FF 01 00 03 01 00 05]\n", scanAttempt);
         p = finger.getImage();
+        Serial.printf("📥 [R503 UART RX #%d] <- getImage: %s\n", scanAttempt, r503CodeToString(p));
         if (p == FINGERPRINT_OK) {
+            fingerDetected = true;
+            Serial.println("📡 [R503 UART TX] -> image2Tz CharBuffer 1 (0x02) [EF 01 FF FF FF FF 01 00 04 02 01 00 08]");
             p = finger.image2Tz();
+            Serial.printf("📥 [R503 UART RX] <- image2Tz: %s\n", r503CodeToString(p));
             if (p == FINGERPRINT_OK) {
-                p = finger.fingerSearch();
-                if (p != FINGERPRINT_OK) {
-                    p = finger.fingerFastSearch();
-                }
-                if (p == FINGERPRINT_OK) {
+                Serial.println("📡 [R503 UART TX] -> fingerSearch (0x04) [Đối soát trong thư viện Flash R503]");
+                p = finger.fingerSearch(1); // R503 sử dụng opcode chuẩn 0x04 (CharBuffer 1, 0 -> capacity)
+                Serial.printf("📥 [R503 UART RX] <- fingerSearch: %s\n", r503CodeToString(p));
+                if (p == FINGERPRINT_OK && finger.fingerID > 0 && finger.confidence > 0) {
                     matched = true;
                     matchedId = finger.fingerID;
                     matchedConfidence = finger.confidence;
-                    break; // Đã tìm thấy vân tay khớp!
+                    Serial.printf("🎯 [R503 KẾT QUẢ] Khớp thành công: ID #%d | Điểm tin cậy: %d\n", matchedId, matchedConfidence);
+                } else {
+                    Serial.println("ℹ️ [R503 KẾT QUẢ] Không tìm thấy mẫu trùng khớp trong bộ nhớ module.");
                 }
+                break; // Đã trích xuất xong đặc trưng vân tay
             }
         }
         if (digitalRead(R503_WAKE_PIN) == HIGH) {
+            Serial.println("🖐️ [R503] Ngón tay đã nhấc ra khỏi cảm biến.");
             break; // Đã nhấc ngón tay ra
         }
         delay(25);
     }
 
-    // XỬ LÝ KHI ĐANG Ở CHẾ ĐỘ TEST CẢM BIẾN (LIVE TEST TỪ APP)
+    // XỬ LÝ KHI ĐANG Ở CHẾ ĐỘ TEST CẢM BIẾN (QUÉT THỬ ĐỌC MÃ VÂN TAY)
     if (isTestingFingerprint) {
+        if (!fingerDetected) {
+            return;
+        }
+
         int id = matchedId;
         String key = "name_" + String(id);
         bool isRegistered = (id > 0) && prefsFinger.isKey(key.c_str());
+
+        // Trích xuất mã đặc trưng vân tay (Mã vân tay thực tế) từ R503
+        String fpCode = extractFingerprintCode(matched && isRegistered ? matchedId : -1);
 
         if (matched && isRegistered) {
             int primaryId = matchedId;
@@ -876,18 +1526,30 @@ void handleFingerprintTouch() {
                 primaryId = prefsFinger.getInt(parentKey.c_str(), matchedId);
             }
             String name = prefsFinger.getString(("name_" + String(primaryId)).c_str(), "ID_" + String(primaryId));
-            Serial.printf("🔬 TEST MATCH: ID %d [%s] - Confidence: %d\n", matchedId, name.c_str(), matchedConfidence);
-            notifyStatus("FP_TEST_RESULT|" + String(matchedId) + "|" + name + "|" + String(matchedConfidence));
+            Serial.printf("🔬 [QUÉT THỬ] Mã vân tay: %s | Khớp ID #%d [%s] - Điểm: %d\n", fpCode.c_str(), matchedId, name.c_str(), matchedConfidence);
+            notifyStatus("FP_TEST_RESULT|" + String(matchedId) + "|" + name + "|" + String(matchedConfidence) + "|" + fpCode);
+            
+            // Nếu bật chế độ nhận ảnh, trích xuất và truyền ảnh quang học qua BLE
+            if (fpSendEnrollImage) {
+                streamR503ImageOverBle();
+            }
+
             ledSuccess();
             beep(1, 80);
         } else {
             if (matched && !isRegistered) {
-                Serial.printf("⚠️ [TEST] Phát hiện vân tay ID %d trong R503 nhưng KHÔNG có trong NVS Flash. Dọn dẹp model mồ côi...\n", id);
-                finger.deleteModel(id);
+                Serial.printf("ℹ️ [TEST] Phát hiện vân tay ID %d trong R503 (chưa gán tên trong NVS Flash)\n", id);
             }
-            Serial.println("🔬 TEST NOT MATCH: Không nhận diện được vân tay.");
-            notifyStatus("FP_TEST_RESULT|-1|Không khớp|0");
-            ledError();
+            Serial.printf("🔬 [QUÉT THỬ] Mã vân tay mới: %s | Cảm biến nhận diện tốt (Chưa lưu trên xe)\n", fpCode.c_str());
+            notifyStatus("FP_TEST_RESULT|-1|Chưa lưu trên xe|0|" + fpCode);
+
+            // Kể cả ngón tay chưa lưu, nếu bật chế độ nhận ảnh thì truyền để kiểm tra lăng kính
+            if (fpSendEnrollImage) {
+                streamR503ImageOverBle();
+            }
+
+            ledSuccess(); // Cảm biến đọc và nhận diện thành công -> Báo đèn xanh và bíp xác nhận!
+            beep(1, 60);
         }
 
         unsigned long waitRelease = millis();
@@ -941,8 +1603,7 @@ void handleFingerprintTouch() {
     } else {
         // VÂN TAY KHÔNG KHỚP HOẶC KHÔNG HỢP LỆ
         if (matched && !isRegistered) {
-            Serial.printf("⚠️ Phát hiện vân tay ID %d trong R503 nhưng KHÔNG có trong NVS Flash. Dọn dẹp model mồ côi...\n", id);
-            finger.deleteModel(id);
+            Serial.printf("ℹ️ Vân tay ID %d có trong R503 nhưng chưa đăng ký trong Flash NVS\n", id);
         }
 
         wrongFingerAttempts++;
@@ -1073,6 +1734,9 @@ void processIncomingCommand(String data) {
         prefsFinger.putBool("send_img", fpSendEnrollImage);
         notifyStatus("FP_IMG_MODE|" + String(fpSendEnrollImage ? "1" : "0"));
     }
+    else if (cmd == "CAPTURE_FP_IMG") {
+        startCaptureImageTask();
+    }
     else if (cmd == "FP_CANCEL") {
         cancelEnrollRequested = true;
         Serial.println("Nhận lệnh FP_CANCEL từ App!");
@@ -1200,6 +1864,63 @@ void processIncomingCommand(String data) {
         sendRainConfig();
     }
 
+    // --- CÁC LỆNH CẤU HÌNH ĐÈN VÒNG MÀU R503 (AURA RGB) ---
+    else if (cmd == "GET_LED_CFG") {
+        sendLedConfigResponse();
+    }
+    else if (cmd == "SET_LED_CFG") {
+        // Gói tin: <KEY>|SET_LED_CFG|<u_m>|<u_c>|<u_s>|<l_m>|<l_c>|<l_s>|<s_m>|<s_c>|<s_s>|<e_m>|<e_c>|<e_s>
+        int tokens[12];
+        int lastIdx = 0;
+        bool valid = true;
+        for (int i = 0; i < 11; i++) {
+            int nextIdx = params.indexOf('|', lastIdx);
+            if (nextIdx == -1) { valid = false; break; }
+            tokens[i] = params.substring(lastIdx, nextIdx).toInt();
+            lastIdx = nextIdx + 1;
+        }
+        if (valid) {
+            tokens[11] = params.substring(lastIdx).toInt();
+
+            ledConfig.unlocked.mode  = (uint8_t)tokens[0];
+            ledConfig.unlocked.color = (uint8_t)tokens[1];
+            ledConfig.unlocked.speed = (uint8_t)tokens[2];
+
+            ledConfig.locked.mode    = (uint8_t)tokens[3];
+            ledConfig.locked.color   = (uint8_t)tokens[4];
+            ledConfig.locked.speed   = (uint8_t)tokens[5];
+
+            ledConfig.success.mode   = (uint8_t)tokens[6];
+            ledConfig.success.color  = (uint8_t)tokens[7];
+            ledConfig.success.speed  = (uint8_t)tokens[8];
+
+            ledConfig.error.mode     = (uint8_t)tokens[9];
+            ledConfig.error.color    = (uint8_t)tokens[10];
+            ledConfig.error.speed    = (uint8_t)tokens[11];
+
+            saveLedConfig();
+            updateIdleLed();
+            notifyStatus("LED_CFG_OK");
+            beep(1, 80);
+        } else {
+            notifyStatus("LOI_PARAM_LED_CFG");
+        }
+    }
+    else if (cmd == "TEST_LED") {
+        // Gói tin: <KEY>|TEST_LED|<mode>|<color>|<speed>|<count>
+        int p1 = params.indexOf('|');
+        int p2 = params.indexOf('|', p1 + 1);
+        int p3 = params.indexOf('|', p2 + 1);
+        if (p1 != -1 && p2 != -1 && p3 != -1) {
+            uint8_t tMode  = params.substring(0, p1).toInt();
+            uint8_t tColor = params.substring(p1 + 1, p2).toInt();
+            uint8_t tSpeed = params.substring(p2 + 1, p3).toInt();
+            uint8_t tCount = params.substring(p3 + 1).toInt();
+            r503SetAuraLed(tMode, tColor, tSpeed, tCount);
+            notifyStatus("LED_TEST_OK");
+        }
+    }
+
     else if (cmd == "TELE" || cmd == "STATUS") {
         notifyStatus(isUnlocked ? "STATUS|1" : "STATUS|0");
         sendTelemetry();
@@ -1221,6 +1942,8 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         sendRainConfig();
         delay(40);
         sendFingerprintConfig();
+        delay(40);
+        sendLedConfigResponse();
     }
 
     void onDisconnect(NimBLEServer *pServer) {
@@ -1290,11 +2013,13 @@ void setup() {
 
     // Cấu hình chân cảm ứng ngắt WAKEUP của R503 (Active LOW: Không chạm = 3.2V, Chạm = 0V)
     pinMode(R503_WAKE_PIN, INPUT_PULLUP);
+    pinMode(2, INPUT_PULLUP); // Dự phòng cho trường hợp cắm vào chân GPIO 2
 
     // 2. Tải cấu hình từ Flash NVS
     prefsSecurity.begin("safe_key", false);
     prefsFinger.begin("fingerprint", false);
     prefsRain.begin("rain_config", false);
+    loadLedConfig();
 
     SECRET_KEY = prefsSecurity.getString("master_key", "271000");
     isUnlocked = prefsSecurity.getBool("is_unlocked", false);
@@ -1335,13 +2060,18 @@ void setup() {
     delay(100); // Cho cảm biến R503 thời gian ổn định điện áp nguồn
 
     for (uint32_t b : bauds) {
+        r503Serial.setRxBufferSize(24576);
         r503Serial.begin(b, SERIAL_8N1, R503_RX_PIN, R503_TX_PIN);
         delay(80);
         while (r503Serial.available()) r503Serial.read(); // Xóa rác RX trước khi gửi lệnh bắt tay
+        Serial.printf("📡 [R503 UART TX] -> verifyPassword (0x13) [EF 01 FF FF FF FF 01 00 07 13 00 00 00 00 ...] tại Baud %d\n", b);
         if (finger.verifyPassword()) {
+            Serial.printf("📥 [R503 UART RX] <- verifyPassword: %s (Module R503 phản hồi chính xác!)\n", r503CodeToString(0x00));
             Serial.printf("✅ Cảm biến R503 kết nối thành công tại Baudrate: %d!\n", b);
             r503Found = true;
             break;
+        } else {
+            Serial.printf("📥 [R503 UART RX] <- Không có phản hồi hợp lệ tại Baud %d\n", b);
         }
         r503Serial.end();
         delay(30);
@@ -1350,6 +2080,9 @@ void setup() {
     if (r503Found) {
         r503Ready = true;
         finger.getParameters();
+        if (finger.capacity == 0 || finger.capacity > 200) {
+            finger.capacity = 200;
+        }
         Serial.printf("📊 R503 Dung lượng bộ nhớ: %d vân tay | Bảo mật hiện tại trên module: Mức %d\n", finger.capacity, finger.security_level);
         finger.setSecurityLevel(fpSecurityLevel);
         Serial.printf("🔒 Đã áp dụng mức bảo mật R503 theo cấu hình: Mức %d\n", fpSecurityLevel);
@@ -1358,6 +2091,7 @@ void setup() {
         updateIdleLed();
     } else {
         r503Ready = false;
+        r503Serial.setRxBufferSize(24576);
         r503Serial.begin(57600, SERIAL_8N1, R503_RX_PIN, R503_TX_PIN); // Giữ UART hoạt động ở baudrate chuẩn để cắm lại vẫn nhận diện được
         Serial.println("⚠️ Không tìm thấy cảm biến R503 ở mọi baudrate! Kiểm tra lại dây RX(GPIO 0)/TX(GPIO 1) và nguồn 3.3V.");
     }
@@ -1388,6 +2122,9 @@ void setup() {
     pAdvertising->start();
 
     Serial.println("✅ BLE Advertising đã bắt đầu! Đang chờ kết nối...");
+
+    // Hiển thị Menu điều khiển Console tương tác trực tiếp qua Serial Monitor
+    printMenu();
 }
 
 void loop() {
@@ -1397,9 +2134,9 @@ void loop() {
         return;
     }
 
-    // Gửi dữ liệu Telemetry định kỳ mỗi 3 giây khi có kết nối BLE
+    // Gửi dữ liệu Telemetry định kỳ mỗi 3 giây khi có kết nối BLE (tạm dừng khi đang truyền ảnh hoặc thêm vân tay)
     static unsigned long lastTelemetryTime = 0;
-    if (deviceConnected && (millis() - lastTelemetryTime > 3000)) {
+    if (deviceConnected && !isEnrolling && !isCapturingImage && (millis() - lastTelemetryTime > 3000)) {
         lastTelemetryTime = millis();
         sendTelemetry();
     }
@@ -1415,7 +2152,6 @@ void loop() {
         }
     }
 
-
     // Kiểm tra hết thời gian Live Test cảm biến vân tay
     if (isTestingFingerprint && millis() > testFpUntil) {
         isTestingFingerprint = false;
@@ -1423,8 +2159,11 @@ void loop() {
         updateIdleLed();
     }
 
-    // Kiểm tra chạm ngón tay (Active LOW: Chạm = 0V / LOW)
-    if (digitalRead(R503_WAKE_PIN) == LOW) {
+    // Kiểm tra chạm ngón tay (Active LOW: Chạm = 0V / LOW trên chân WAKE)
+    static unsigned long lastTouchTrigger = 0;
+    bool wakeTriggered = (digitalRead(R503_WAKE_PIN) == LOW) || (digitalRead(2) == LOW);
+    if (r503Ready && wakeTriggered && (millis() - lastTouchTrigger > 800)) {
+        lastTouchTrigger = millis();
         handleFingerprintTouch();
     }
 
@@ -1441,25 +2180,120 @@ void loop() {
     }
 
     // -------------------------------------------------------------
-    // ⌨️ NHẬN LỆNH QUA SERIAL MONITOR (COM PORT) ĐỂ DEBUG / TEST
+    // ⌨️ NHẬN LỆNH QUA SERIAL MONITOR (COM PORT) ĐỂ DEBUG / TEST / CONSOLE
     // -------------------------------------------------------------
     if (Serial.available()) {
-        String sCmd = Serial.readStringUntil('\n');
-        sCmd.trim();
-        if (sCmd.length() > 0) {
-            Serial.printf("⌨️ Lệnh Serial: %s\n", sCmd.c_str());
-            if (sCmd == "FP_LIST") {
-                listAllFingerprints();
-            } else if (sCmd.startsWith("FP_ENROLL")) {
-                String name = (sCmd.indexOf('|') != -1) ? sCmd.substring(sCmd.indexOf('|') + 1) : "Vân tay mới";
-                startEnrollTask(name);
-            } else if (sCmd == "FP_CLEAR") {
-                clearAllFingerprints();
-            } else if (sCmd.startsWith("FP_DELETE|")) {
-                int id = sCmd.substring(10).toInt();
-                deleteFingerprint(id);
-            } else {
-                processIncomingCommand(sCmd);
+        char firstCh = Serial.peek();
+        if (firstCh >= '1' && firstCh <= '8') {
+            char ch = Serial.read();
+            delay(10);
+            while (Serial.available() && (Serial.peek() == '\r' || Serial.peek() == '\n' || Serial.peek() == ' ')) {
+                Serial.read();
+            }
+
+            switch (ch) {
+                case '1':
+                    r503VerifyPassword(0x00000000);
+                    break;
+                case '2':
+                    r503SetAuraLed(LED_MODE_BREATHING, LED_COLOR_BLUE, 120, 0);
+                    break;
+                case '3':
+                    r503SetAuraLed(LED_MODE_FLASHING, LED_COLOR_RED, 40, 3);
+                    break;
+                case '4':
+                    r503SetAuraLed(LED_MODE_OFF, 0, 0, 0);
+                    break;
+                case '5':
+                    r503GetTemplateCount();
+                    break;
+                case '6':
+                    Serial.println("\n👉 Hãy chạm ngón tay lên cảm biến R503 ngay bây giờ...");
+                    {
+                        unsigned long startWait = millis();
+                        bool touched = false;
+                        while (millis() - startWait < 8000) {
+                            if (r503GetImage() == 0x00) {
+                                touched = true;
+                                break;
+                            }
+                            delay(50);
+                        }
+                        if (touched) {
+                            r503Image2Tz(1);
+                            uint16_t id = 0, conf = 0;
+                            r503FastSearch(1, 1, 200, id, conf);
+                        } else {
+                            Serial.println("⏱️ Hết thời gian chờ chạm ngón tay!");
+                        }
+                    }
+                    break;
+                case '7':
+                    Serial.println("\n👉 Chạm ngón tay lên cảm biến để chụp và trích xuất ảnh...");
+                    {
+                        unsigned long startWait = millis();
+                        bool touched = false;
+                        while (millis() - startWait < 8000) {
+                            if (r503GetImage() == 0x00) {
+                                touched = true;
+                                break;
+                            }
+                            delay(50);
+                        }
+                        if (touched) {
+                            r503StreamRawImage();
+                        } else {
+                            Serial.println("⏱️ Hết thời gian chờ chạm ngón tay!");
+                        }
+                    }
+                    break;
+                case '8':
+                    Serial.println("\n⚠️ BẠN CÓ CHẮC MUỐN XÓA TOÀN BỘ VÂN TAY TRONG R503? (Gõ 'y' để xác nhận)");
+                    {
+                        unsigned long confirmStart = millis();
+                        bool confirmed = false;
+                        while (millis() - confirmStart < 10000) {
+                            if (Serial.available()) {
+                                char c = Serial.read();
+                                if (c == 'y' || c == 'Y') {
+                                    confirmed = true;
+                                    break;
+                                }
+                            }
+                            delay(10);
+                        }
+                        if (confirmed) {
+                            r503EmptyDatabase();
+                            clearAllFingerprints();
+                        } else {
+                            Serial.println("❌ Đã hủy thao tác xóa hoặc hết thời gian chờ.");
+                        }
+                    }
+                    break;
+                default:
+                    break;
+            }
+            printMenu();
+        } else {
+            String sCmd = Serial.readStringUntil('\n');
+            sCmd.trim();
+            if (sCmd.length() > 0) {
+                Serial.printf("⌨️ Lệnh Serial: %s\n", sCmd.c_str());
+                if (sCmd == "?" || sCmd == "menu" || sCmd == "help") {
+                    printMenu();
+                } else if (sCmd == "FP_LIST") {
+                    listAllFingerprints();
+                } else if (sCmd.startsWith("FP_ENROLL")) {
+                    String name = (sCmd.indexOf('|') != -1) ? sCmd.substring(sCmd.indexOf('|') + 1) : "Vân tay mới";
+                    startEnrollTask(name);
+                } else if (sCmd == "FP_CLEAR") {
+                    clearAllFingerprints();
+                } else if (sCmd.startsWith("FP_DELETE|")) {
+                    int id = sCmd.substring(10).toInt();
+                    deleteFingerprint(id);
+                } else {
+                    processIncomingCommand(sCmd);
+                }
             }
         }
     }

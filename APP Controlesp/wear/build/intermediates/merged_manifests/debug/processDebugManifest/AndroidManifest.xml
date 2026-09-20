@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.control_esp"
+    package="com.example.control_esp.wear"
     android:versionCode="1"
     android:versionName="1.0" >
 
@@ -16,10 +16,10 @@
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
 
     <permission
-        android:name="com.example.control_esp.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+        android:name="com.example.control_esp.wear.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
         android:protectionLevel="signature" />
 
-    <uses-permission android:name="com.example.control_esp.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+    <uses-permission android:name="com.example.control_esp.wear.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
 
     <application
         android:allowBackup="true"
@@ -61,7 +61,7 @@
 
         <provider
             android:name="androidx.startup.InitializationProvider"
-            android:authorities="com.example.control_esp.androidx-startup"
+            android:authorities="com.example.control_esp.wear.androidx-startup"
             android:exported="false" >
             <meta-data
                 android:name="androidx.emoji2.text.EmojiCompatInitializer"

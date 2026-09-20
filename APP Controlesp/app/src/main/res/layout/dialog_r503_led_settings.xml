@@ -1,0 +1,375 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="#0F172A"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <!-- HEADER -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="16dp">
+
+            <FrameLayout
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:background="@drawable/avatar_fp_gold_bg">
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_fingerprint"
+                    app:tint="@color/gold_primary" />
+            </FrameLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="ĐÈN VÒNG MÀU R503"
+                    android:textColor="@color/gold_primary"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Bánh xe màu RGB 360° &amp; 4 sự kiện xe"
+                    android:textColor="#94A3B8"
+                    android:textSize="11sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 1. CHỌN SỰ KIỆN ĐỂ CẤU HÌNH (4 TABS) -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="1. CHỌN SỰ KIỆN TRẠNG THÁI XE"
+            android:textColor="#CBD5E1"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:orientation="horizontal"
+            android:weightSum="4"
+            android:layout_marginBottom="12dp">
+
+            <Button
+                android:id="@+id/btnTabUnlocked"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="Xe Mở"
+                android:textSize="11sp"
+                android:textColor="#FFFFFF"
+                android:background="@drawable/button_background_secondary_on"
+                android:layout_marginEnd="3dp"
+                android:textAllCaps="false" />
+
+            <Button
+                android:id="@+id/btnTabLocked"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="Xe Khóa"
+                android:textSize="11sp"
+                android:textColor="#94A3B8"
+                android:background="@drawable/button_background_secondary"
+                android:layout_marginEnd="3dp"
+                android:textAllCaps="false" />
+
+            <Button
+                android:id="@+id/btnTabSuccess"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="Quét Đúng"
+                android:textSize="11sp"
+                android:textColor="#94A3B8"
+                android:background="@drawable/button_background_secondary"
+                android:layout_marginEnd="3dp"
+                android:textAllCaps="false" />
+
+            <Button
+                android:id="@+id/btnTabError"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="Quét Sai"
+                android:textSize="11sp"
+                android:textColor="#94A3B8"
+                android:background="@drawable/button_background_secondary"
+                android:textAllCaps="false" />
+        </LinearLayout>
+
+        <!-- BADGE TRẠNG THÁI HIỆN TẠI -->
+        <TextView
+            android:id="@+id/tvCurrentEditingBadge"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#1E293B"
+            android:padding="8dp"
+            android:text="Đang chỉnh: [Xe Mở Khóa / Đang Chạy]"
+            android:textColor="#38BDF8"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:layout_marginBottom="12dp" />
+
+        <!-- 2. BÁNH XE MÀU RGB 360 ĐỘ -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp">
+
+            <com.example.control_esp.RgbColorWheelView
+                android:id="@+id/rgbColorWheel"
+                android:layout_width="220dp"
+                android:layout_height="220dp"
+                android:layout_gravity="center" />
+        </FrameLayout>
+
+        <!-- TÊN MÀU ĐANG CHỌN -->
+        <TextView
+            android:id="@+id/tvSelectedColorDisplay"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Màu Đang Chọn: Xanh Dương (Ocean)"
+            android:textColor="#007AFF"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:layout_marginBottom="16dp" />
+
+        <!-- 3. KIỂU HIỆU ỨNG (MODE) -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="2. KIỂU HIỆU ỨNG ĐÈN"
+            android:textColor="#CBD5E1"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="6dp" />
+
+        <RadioGroup
+            android:id="@+id/rgEffectMode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:weightSum="4"
+            android:layout_marginBottom="14dp">
+
+            <RadioButton
+                android:id="@+id/rbModeBreathing"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Thở"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp"
+                android:checked="true" />
+
+            <RadioButton
+                android:id="@+id/rbModeOn"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Sáng"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp" />
+
+            <RadioButton
+                android:id="@+id/rbModeFlashing"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Nháy"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp" />
+
+            <RadioButton
+                android:id="@+id/rbModeOff"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Tắt"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp" />
+        </RadioGroup>
+
+        <!-- 4. TỐC ĐỘ HIỆU ỨNG (SPEED) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="4dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="3. TỐC ĐỘ HIỆU ỨNG"
+                android:textColor="#CBD5E1"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvSpeedValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="120 (Mượt)"
+                android:textColor="#FBBF24"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <SeekBar
+            android:id="@+id/sbEffectSpeed"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="220"
+            android:progress="120"
+            android:progressTint="#FBBF24"
+            android:thumbTint="#FBBF24"
+            android:layout_marginBottom="16dp" />
+
+        <!-- 5. BỘ PHONG CÁCH CHỌN NHANH (PRESETS) -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="✨ BỘ PHONG CÁCH CHỌN NHANH (PRESETS)"
+            android:textColor="#F59E0B"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none"
+            android:layout_marginBottom="20dp">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnPresetOcean"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:text="🐬 Ocean Cyan"
+                    android:textSize="11sp"
+                    android:textColor="#00F5D4"
+                    android:background="@drawable/button_background_secondary"
+                    android:layout_marginEnd="8dp"
+                    android:textAllCaps="false" />
+
+                <Button
+                    android:id="@+id/btnPresetCyberpunk"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:text="🟣 Cyberpunk"
+                    android:textSize="11sp"
+                    android:textColor="#AF52DE"
+                    android:background="@drawable/button_background_secondary"
+                    android:layout_marginEnd="8dp"
+                    android:textAllCaps="false" />
+
+                <Button
+                    android:id="@+id/btnPresetRacing"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:text="🏎️ Sport Racing"
+                    android:textSize="11sp"
+                    android:textColor="#FF2D55"
+                    android:background="@drawable/button_background_secondary"
+                    android:layout_marginEnd="8dp"
+                    android:textAllCaps="false" />
+
+                <Button
+                    android:id="@+id/btnPresetEmerald"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:text="🌿 Emerald"
+                    android:textSize="11sp"
+                    android:textColor="#34C759"
+                    android:background="@drawable/button_background_secondary"
+                    android:layout_marginEnd="8dp"
+                    android:textAllCaps="false" />
+
+                <Button
+                    android:id="@+id/btnPresetStealth"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:text="🛡️ Stealth Eco"
+                    android:textSize="11sp"
+                    android:textColor="#94A3B8"
+                    android:background="@drawable/button_background_secondary"
+                    android:textAllCaps="false" />
+            </LinearLayout>
+        </HorizontalScrollView>
+
+        <!-- BUTTONS ACTION -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+
+            <Button
+                android:id="@+id/btnTestLedLive"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:text="⚡ Thử Trên R503"
+                android:textColor="#000000"
+                android:textStyle="bold"
+                android:textSize="12sp"
+                android:background="@drawable/btn_cyan_hero"
+                android:layout_marginEnd="6dp" />
+
+            <Button
+                android:id="@+id/btnSaveLedConfig"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:text="💾 Lưu Cấu Hình"
+                android:textColor="#000000"
+                android:textStyle="bold"
+                android:textSize="12sp"
+                android:background="@drawable/btn_gold_hero"
+                android:layout_marginStart="6dp" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/btnDismissLedDialog"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:text="Đóng"
+            android:textColor="#94A3B8"
+            android:background="@android:color/transparent"
+            android:textAllCaps="false" />
+
+    </LinearLayout>
+</ScrollView>

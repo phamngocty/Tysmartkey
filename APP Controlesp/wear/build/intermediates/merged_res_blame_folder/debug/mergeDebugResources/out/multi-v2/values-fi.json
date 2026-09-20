@@ -4,7 +4,7 @@
             "outputFile": "com.example.control_esp.wear-mergeDebugResources-37:/values-fi/values-fi.xml",
             "map": [
                 {
-                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.5.0\\transforms\\0cf5456e6ec95ee2b51ff1f908a825b4\\transformed\\play-services-base-18.5.0\\res\\values-fi\\values.xml",
+                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.6.0\\transforms\\4ec2f659b63804c5ba68acb74f4003df\\transformed\\play-services-base-18.5.0\\res\\values-fi\\values.xml",
                     "from": {
                         "startLines": "4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20",
                         "startColumns": "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
@@ -21,7 +21,7 @@
                     }
                 },
                 {
-                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.5.0\\transforms\\3a804a2aa226e174b2dc0c5a1623aed3\\transformed\\play-services-basement-18.9.0\\res\\values-fi\\values.xml",
+                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.6.0\\transforms\\6fa7aa0c2fddba23fcc2509ebd9a8209\\transformed\\play-services-basement-18.9.0\\res\\values-fi\\values.xml",
                     "from": {
                         "startLines": "4",
                         "startColumns": "0",
@@ -38,24 +38,24 @@
                     }
                 },
                 {
-                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.5.0\\transforms\\10ad62b3704653069e5b34ade80b3147\\transformed\\foundation-release\\res\\values-fi\\values-fi.xml",
+                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.6.0\\transforms\\5a664a2f2ff07975368ee07c298a6338\\transformed\\core-1.16.0\\res\\values-fi\\values-fi.xml",
                     "from": {
-                        "startLines": "2,3,4",
-                        "startColumns": "4,4,4",
-                        "startOffsets": "55,142,232",
-                        "endColumns": "86,89,89",
-                        "endOffsets": "137,227,317"
+                        "startLines": "2,3,4,5,6,7,8,9",
+                        "startColumns": "4,4,4,4,4,4,4,4",
+                        "startOffsets": "55,151,253,351,456,561,673,789",
+                        "endColumns": "95,101,97,104,104,111,115,100",
+                        "endOffsets": "146,248,346,451,556,668,784,885"
                     },
                     "to": {
-                        "startLines": "2,48,49",
-                        "startColumns": "4,4,4",
-                        "startOffsets": "105,4832,4922",
-                        "endColumns": "86,89,89",
-                        "endOffsets": "187,4917,5007"
+                        "startLines": "3,4,5,6,7,8,9,44",
+                        "startColumns": "4,4,4,4,4,4,4,4",
+                        "startOffsets": "192,288,390,488,593,698,810,4460",
+                        "endColumns": "95,101,97,104,104,111,115,100",
+                        "endOffsets": "283,385,483,588,693,805,921,4556"
                     }
                 },
                 {
-                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.5.0\\transforms\\82fcf2a5dc806172a78f479eafdac75b\\transformed\\ui-release\\res\\values-fi\\values-fi.xml",
+                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.6.0\\transforms\\fe778710c89dd29db76fea357e5b77f1\\transformed\\ui-release\\res\\values-fi\\values-fi.xml",
                     "from": {
                         "startLines": "3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21",
                         "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4",
@@ -72,20 +72,20 @@
                     }
                 },
                 {
-                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.5.0\\transforms\\8bffcc8846e2d6bea6d5d4ac0c134303\\transformed\\core-1.16.0\\res\\values-fi\\values-fi.xml",
+                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.6.0\\transforms\\3ebbee1068c6b6aee81f0377ca29bbe6\\transformed\\foundation-release\\res\\values-fi\\values-fi.xml",
                     "from": {
-                        "startLines": "2,3,4,5,6,7,8,9",
-                        "startColumns": "4,4,4,4,4,4,4,4",
-                        "startOffsets": "55,151,253,351,456,561,673,789",
-                        "endColumns": "95,101,97,104,104,111,115,100",
-                        "endOffsets": "146,248,346,451,556,668,784,885"
+                        "startLines": "2,3,4",
+                        "startColumns": "4,4,4",
+                        "startOffsets": "55,142,232",
+                        "endColumns": "86,89,89",
+                        "endOffsets": "137,227,317"
                     },
                     "to": {
-                        "startLines": "3,4,5,6,7,8,9,44",
-                        "startColumns": "4,4,4,4,4,4,4,4",
-                        "startOffsets": "192,288,390,488,593,698,810,4460",
-                        "endColumns": "95,101,97,104,104,111,115,100",
-                        "endOffsets": "283,385,483,588,693,805,921,4556"
+                        "startLines": "2,48,49",
+                        "startColumns": "4,4,4",
+                        "startOffsets": "105,4832,4922",
+                        "endColumns": "86,89,89",
+                        "endOffsets": "187,4917,5007"
                     }
                 }
             ]

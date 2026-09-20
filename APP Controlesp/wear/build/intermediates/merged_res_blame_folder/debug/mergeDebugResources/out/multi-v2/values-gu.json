@@ -4,7 +4,7 @@
             "outputFile": "com.example.control_esp.wear-mergeDebugResources-37:/values-gu/values-gu.xml",
             "map": [
                 {
-                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.5.0\\transforms\\8bffcc8846e2d6bea6d5d4ac0c134303\\transformed\\core-1.16.0\\res\\values-gu\\values-gu.xml",
+                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.6.0\\transforms\\5a664a2f2ff07975368ee07c298a6338\\transformed\\core-1.16.0\\res\\values-gu\\values-gu.xml",
                     "from": {
                         "startLines": "2,3,4,5,6,7,8,9",
                         "startColumns": "4,4,4,4,4,4,4,4",
@@ -21,7 +21,7 @@
                     }
                 },
                 {
-                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.5.0\\transforms\\3a804a2aa226e174b2dc0c5a1623aed3\\transformed\\play-services-basement-18.9.0\\res\\values-gu\\values.xml",
+                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.6.0\\transforms\\6fa7aa0c2fddba23fcc2509ebd9a8209\\transformed\\play-services-basement-18.9.0\\res\\values-gu\\values.xml",
                     "from": {
                         "startLines": "4",
                         "startColumns": "0",
@@ -38,24 +38,24 @@
                     }
                 },
                 {
-                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.5.0\\transforms\\82fcf2a5dc806172a78f479eafdac75b\\transformed\\ui-release\\res\\values-gu\\values-gu.xml",
+                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.6.0\\transforms\\3ebbee1068c6b6aee81f0377ca29bbe6\\transformed\\foundation-release\\res\\values-gu\\values-gu.xml",
                     "from": {
-                        "startLines": "3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21",
-                        "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4",
-                        "startOffsets": "200,292,374,467,566,653,739,840,927,1013,1096,1179,1254,1338,1413,1488,1563,1639,1705",
-                        "endColumns": "91,81,92,98,86,85,100,86,85,82,82,74,83,74,74,74,75,65,115",
-                        "endOffsets": "287,369,462,561,648,734,835,922,1008,1091,1174,1249,1333,1408,1483,1558,1634,1700,1816"
+                        "startLines": "2,3,4",
+                        "startColumns": "4,4,4",
+                        "startOffsets": "55,149,234",
+                        "endColumns": "93,84,84",
+                        "endOffsets": "144,229,314"
                     },
                     "to": {
-                        "startLines": "10,11,30,31,32,33,34,35,36,37,38,39,40,41,42,43,45,46,47",
-                        "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4",
-                        "startOffsets": "921,1013,3271,3364,3463,3550,3636,3737,3824,3910,3993,4076,4151,4235,4310,4385,4561,4637,4703",
-                        "endColumns": "91,81,92,98,86,85,100,86,85,82,82,74,83,74,74,74,75,65,115",
-                        "endOffsets": "1008,1090,3359,3458,3545,3631,3732,3819,3905,3988,4071,4146,4230,4305,4380,4455,4632,4698,4814"
+                        "startLines": "2,48,49",
+                        "startColumns": "4,4,4",
+                        "startOffsets": "105,4819,4904",
+                        "endColumns": "93,84,84",
+                        "endOffsets": "194,4899,4984"
                     }
                 },
                 {
-                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.5.0\\transforms\\0cf5456e6ec95ee2b51ff1f908a825b4\\transformed\\play-services-base-18.5.0\\res\\values-gu\\values.xml",
+                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.6.0\\transforms\\4ec2f659b63804c5ba68acb74f4003df\\transformed\\play-services-base-18.5.0\\res\\values-gu\\values.xml",
                     "from": {
                         "startLines": "4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20",
                         "startColumns": "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
@@ -72,20 +72,20 @@
                     }
                 },
                 {
-                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.5.0\\transforms\\10ad62b3704653069e5b34ade80b3147\\transformed\\foundation-release\\res\\values-gu\\values-gu.xml",
+                    "source": "C:\\Users\\phamn\\.gradle\\caches\\9.6.0\\transforms\\fe778710c89dd29db76fea357e5b77f1\\transformed\\ui-release\\res\\values-gu\\values-gu.xml",
                     "from": {
-                        "startLines": "2,3,4",
-                        "startColumns": "4,4,4",
-                        "startOffsets": "55,149,234",
-                        "endColumns": "93,84,84",
-                        "endOffsets": "144,229,314"
+                        "startLines": "3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21",
+                        "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4",
+                        "startOffsets": "200,292,374,467,566,653,739,840,927,1013,1096,1179,1254,1338,1413,1488,1563,1639,1705",
+                        "endColumns": "91,81,92,98,86,85,100,86,85,82,82,74,83,74,74,74,75,65,115",
+                        "endOffsets": "287,369,462,561,648,734,835,922,1008,1091,1174,1249,1333,1408,1483,1558,1634,1700,1816"
                     },
                     "to": {
-                        "startLines": "2,48,49",
-                        "startColumns": "4,4,4",
-                        "startOffsets": "105,4819,4904",
-                        "endColumns": "93,84,84",
-                        "endOffsets": "194,4899,4984"
+                        "startLines": "10,11,30,31,32,33,34,35,36,37,38,39,40,41,42,43,45,46,47",
+                        "startColumns": "4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4",
+                        "startOffsets": "921,1013,3271,3364,3463,3550,3636,3737,3824,3910,3993,4076,4151,4235,4310,4385,4561,4637,4703",
+                        "endColumns": "91,81,92,98,86,85,100,86,85,82,82,74,83,74,74,74,75,65,115",
+                        "endOffsets": "1008,1090,3359,3458,3545,3631,3732,3819,3905,3988,4071,4146,4230,4305,4380,4455,4632,4698,4814"
                     }
                 }
             ]
