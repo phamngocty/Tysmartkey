@@ -36,10 +36,17 @@ object BleManager {
     var onMessageReceived: ((String) -> Unit)? = null
     var onConnectionStateChanged: ((Boolean) -> Unit)? = null
     var onRssiRead: ((Int) -> Unit)? = null
+    var onBondStateChanged: ((Int) -> Unit)? = null
     var lastRssi: Int = -62
 
     val isConnected: Boolean
         get() = activeMac?.let { gattMap.containsKey(it) } == true
+
+    val currentBondState: Int
+        get() = activeMac?.let { bluetoothAdapter?.getRemoteDevice(it)?.bondState } ?: BluetoothDevice.BOND_NONE
+
+    val isBonded: Boolean
+        get() = currentBondState == BluetoothDevice.BOND_BONDED
 
     fun readRssi() {
         val mac = activeMac ?: return
@@ -182,6 +189,22 @@ object BleManager {
                         
                         gattMap[gatt.device.address] = gatt
                         Log.i(TAG, "Services discovered & Notifications enabled.")
+
+                        // Nếu thiết bị chưa ghép đôi (chưa lưu LTK AES-128), kích hoạt quá trình xác thực SMP
+                        if (gatt.device.bondState != BluetoothDevice.BOND_BONDED) {
+                            Log.i(TAG, "Device not bonded (state=${gatt.device.bondState}). Triggering SMP pairing...")
+                            try {
+                                gatt.device.createBond()
+                            } catch (e: Exception) {
+                                Log.w(TAG, "createBond failed", e)
+                            }
+                            try {
+                                gatt.readCharacteristic(characteristic)
+                            } catch (e: Exception) {
+                                Log.w(TAG, "readCharacteristic failed", e)
+                            }
+                        }
+
                         onConnectionStateChanged?.invoke(true)
                         onResult(true)
                     } else {
@@ -194,12 +217,32 @@ object BleManager {
                 }
             }
 
+            @Deprecated("Deprecated in Java")
+            override fun onCharacteristicRead(
+                gatt: BluetoothGatt,
+                characteristic: BluetoothGattCharacteristic,
+                status: Int
+            ) {
+                Log.d(TAG, "onCharacteristicRead (legacy) status: $status")
+            }
+
+            override fun onCharacteristicRead(
+                gatt: BluetoothGatt,
+                characteristic: BluetoothGattCharacteristic,
+                value: ByteArray,
+                status: Int
+            ) {
+                Log.d(TAG, "onCharacteristicRead status: $status")
+            }
+
             // Xử lý dữ liệu phản hồi từ ESP32 gửi lên
             @Deprecated("Deprecated in Java")
             override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-                @Suppress("DEPRECATION")
-                val data = characteristic.value ?: return
-                handleIncomingBytes(data)
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                    @Suppress("DEPRECATION")
+                    val data = characteristic.value ?: return
+                    handleIncomingBytes(data)
+                }
             }
 
             override fun onCharacteristicChanged(
@@ -228,8 +271,8 @@ object BleManager {
         val incomingStr = String(bytes, Charsets.UTF_8)
         incomingBuffer.append(incomingStr)
 
-        // Phòng chống tràn bộ đệm khi dữ liệu rác không có ký tự ngắt dòng \n
-        if (incomingBuffer.length > 16384) {
+        // Phòng chống tràn bộ đệm (đặt ngưỡng 256KB an toàn cho luồng ảnh Base64 28KB)
+        if (incomingBuffer.length > 262144) {
             val lastFbIdx = incomingBuffer.lastIndexOf("FB|")
             if (lastFbIdx >= 0) {
                 incomingBuffer.delete(0, lastFbIdx)
@@ -293,19 +336,36 @@ object BleManager {
         val fullCmd = "$key|$cmd\n"
         val bytes = fullCmd.toByteArray()
 
+        val isDeviceBonded = (gatt.device.bondState == BluetoothDevice.BOND_BONDED)
+        val writeType = if (isDeviceBonded) {
+            BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+        } else {
+            BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        }
+
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val status = gatt.writeCharacteristic(characteristic, bytes, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)
+            val status = gatt.writeCharacteristic(characteristic, bytes, writeType)
             status == BluetoothStatusCodes.SUCCESS
         } else {
             @Suppress("DEPRECATION")
             characteristic.value = bytes
             @Suppress("DEPRECATION")
-            characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            characteristic.writeType = writeType
             @Suppress("DEPRECATION")
             gatt.writeCharacteristic(characteristic)
         }.also {
             if (it) Log.d(TAG, "Command sent via BLE: $fullCmd")
             else Log.e(TAG, "Failed to write characteristic")
+        }
+    }
+
+    fun triggerBonding(): Boolean {
+        val mac = activeMac ?: return false
+        val device = bluetoothAdapter?.getRemoteDevice(mac) ?: return false
+        return if (device.bondState == BluetoothDevice.BOND_NONE) {
+            device.createBond()
+        } else {
+            true
         }
     }
 }

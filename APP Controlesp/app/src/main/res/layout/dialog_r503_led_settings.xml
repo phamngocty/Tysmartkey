@@ -159,7 +159,18 @@
             android:textSize="13sp"
             android:textStyle="bold"
             android:gravity="center"
-            android:layout_marginBottom="16dp" />
+            android:layout_marginBottom="6dp" />
+
+        <!-- GỢI Ý PHẦN CỨNG R503 BI-COLOR VS RGB -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="ℹ️ R503 chuẩn (2 màu) hỗ trợ: Đỏ, Xanh Dương, Tím.\nBản R503-RGB hỗ trợ thêm: Xanh Lá, Vàng, Cyan, Trắng."
+            android:textColor="#64748B"
+            android:textSize="10.5sp"
+            android:gravity="center"
+            android:lineSpacingExtra="2dp"
+            android:layout_marginBottom="14dp" />
 
         <!-- 3. KIỂU HIỆU ỨNG (MODE) -->
         <TextView

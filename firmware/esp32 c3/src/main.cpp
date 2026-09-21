@@ -94,6 +94,10 @@ bool fpSendEnrollImage = false;   // Gửi ảnh vân tay khi lấy mẫu (bật
 bool isTestingFingerprint = false; // Chế độ test cảm biến không bật/tắt xe
 unsigned long testFpUntil = 0;
 
+// Bộ hẹn giờ tự động chuyển về màu đèn trạng thái xe (updateIdleLed) sau hiệu ứng nháy
+bool pendingIdleLedUpdate = false;
+unsigned long pendingIdleLedUntil = 0;
+
 // ==========================================
 // 🔔 3. HÀM PHẢN HỒI & HIỆU ỨNG (FEEDBACK)
 // ==========================================
@@ -255,12 +259,23 @@ bool syncUartHeader(unsigned long timeoutMs = 2000) {
     return false;
 }
 
-// Đọc chính xác N bytes từ UART
+// Đọc chính xác N bytes từ UART với cơ chế đọc khối trực tiếp và tự động gia hạn timeout
 bool readUartBytes(uint8_t *buf, size_t len, unsigned long timeoutMs = 1000) {
-    for (size_t i = 0; i < len; i++) {
-        if (!readUartByte(&buf[i], timeoutMs)) return false;
+    size_t readCount = 0;
+    unsigned long start = millis();
+    while (readCount < len && (millis() - start < timeoutMs)) {
+        int avail = r503Serial.available();
+        if (avail > 0) {
+            size_t toRead = (size_t)avail;
+            if (toRead > (len - readCount)) toRead = len - readCount;
+            size_t n = r503Serial.read(buf + readCount, toRead);
+            readCount += n;
+            start = millis(); // Reset timeout sau mỗi khối byte đọc thành công
+        } else {
+            delayMicroseconds(20);
+        }
     }
-    return true;
+    return (readCount == len);
 }
 
 // Gửi một gói tin lệnh chuẩn R502/R503
@@ -378,6 +393,9 @@ bool r503SetAuraLed(uint8_t mode, uint8_t color, uint8_t speed = 50, uint8_t cou
 
     Serial.printf("\n--- [2] ĐIỀU KHIỂN AURA LED (0x35): Mode=0x%02X (%s), Color=0x%02X (%s), Speed=%d, Count=%d ---\n",
                   mode, modeName, color, colorName, speed, count);
+    if (color >= 4) {
+        Serial.println("ℹ️ Lưu ý phần cứng: Màu 0x04-0x07 (Xanh lá/Vàng/Cyan/Trắng) chỉ phát sáng trên R503-RGB. Với module R503 chuẩn (Bi-color), chỉ có 2 bóng LED vật lý Đỏ và Xanh dương (0x01-0x03).");
+    }
     sendCommandPacket(R503_CMD_AURA_LED, payload, 4);
 
     uint8_t code = 0xFF;
@@ -543,6 +561,7 @@ void loadLedConfig() {
 }
 
 void saveLedConfig() {
+    prefsLed.begin("led_cfg", false);
     prefsLed.putUChar("u_m", ledConfig.unlocked.mode);
     prefsLed.putUChar("u_c", ledConfig.unlocked.color);
     prefsLed.putUChar("u_s", ledConfig.unlocked.speed);
@@ -562,7 +581,7 @@ void saveLedConfig() {
 }
 
 void sendLedConfigResponse() {
-    String resp = "FB|LED_CFG|" +
+    String resp = "LED_CFG|" +
                   String(ledConfig.unlocked.mode) + "|" + String(ledConfig.unlocked.color) + "|" + String(ledConfig.unlocked.speed) + "|" +
                   String(ledConfig.locked.mode) + "|" + String(ledConfig.locked.color) + "|" + String(ledConfig.locked.speed) + "|" +
                   String(ledConfig.success.mode) + "|" + String(ledConfig.success.color) + "|" + String(ledConfig.success.speed) + "|" +
@@ -635,8 +654,12 @@ void setVehicleUnlock(bool unlock, bool saveFlash = true, bool notify = true) {
     if (r503Ready) {
         if (isUnlocked) {
             ledSuccess();
+            pendingIdleLedUntil = millis() + 650; // Sau 2 nhịp nháy (~650ms), tự chuyển sang màu Xe Mở
+            pendingIdleLedUpdate = true;
         } else {
             ledError();
+            pendingIdleLedUntil = millis() + 750; // Sau 3 nhịp nháy (~750ms), tự chuyển sang màu Xe Khóa (Tắt)
+            pendingIdleLedUpdate = true;
         }
     }
 }
@@ -730,26 +753,16 @@ int getNextFreeFingerIdExcluding(int excludeId) {
     return -1;
 }
 
-// Trích xuất ảnh vân tay thô từ cảm biến R503 và truyền qua BLE (Kiến trúc 2 pha có RAM buffer & bộ đồng bộ gói tin động)
+// Trích xuất ảnh vân tay thô từ cảm biến R503 và truyền qua BLE (Khung truyền định danh chuẩn & Kiểm tra Checksum)
 bool streamR503ImageOverBle() {
     Serial.println("📷 Bắt đầu trích xuất ảnh vân tay từ R503...");
     
     // Settle delay để cảm biến R503 hoàn tất ghi vào ImageBuffer nội bộ sau khi getImage()
     vTaskDelay(pdMS_TO_TICKS(60));
 
-    // Gửi lệnh UpImage (0x0A) qua packet engine
-    sendCommandPacket(R503_CMD_UP_IMAGE, nullptr, 0);
-
-    // 1. Chờ gói tin ACK phản hồi UpImage
-    uint8_t ackCode = 0xFF;
-    if (!receiveAckPacket(ackCode, nullptr, nullptr, 2500) || ackCode != 0x00) {
-        Serial.printf("❌ R503 từ chối gửi ảnh: %s\n", r503GetStatusString(ackCode));
-        notifyStatus("FP_IMG_ERR");
-        return false;
-    }
-
-    // 2. Cấp phát bộ nhớ đệm RAM (32KB) để gom toàn bộ các gói tin dữ liệu ảnh từ UART
+    // 1. Cấp phát bộ nhớ đệm RAM (32KB) TRƯỚC KHI gửi lệnh UpImage (tránh trễ nhịp UART)
     const size_t MAX_IMG_BYTES = 32768;
+    const size_t TOTAL_IMAGE_BYTES = 18432; // Chuẩn 192x192 pixels (2 pixels/byte) = 18.432 bytes
     uint8_t *imgBuffer = (uint8_t *)malloc(MAX_IMG_BYTES);
     if (!imgBuffer) {
         Serial.println("❌ Không đủ RAM để đệm ảnh vân tay!");
@@ -757,79 +770,114 @@ bool streamR503ImageOverBle() {
         return false;
     }
 
-    // PHA 1: THU THẬP TẤT CẢ GÓI DỮ LIỆU TỪ UART VÀO RAM LIÊN TỤC
+    // Xóa sạch toàn bộ rác tồn đọng trong UART RX buffer trước khi phát lệnh UpImage
+    while (r503Serial.available()) r503Serial.read();
+
+    // Gửi lệnh UpImage (0x0A) qua packet engine
+    sendCommandPacket(R503_CMD_UP_IMAGE, nullptr, 0);
+
+    // Chờ gói tin ACK phản hồi UpImage
+    uint8_t ackCode = 0xFF;
+    if (!receiveAckPacket(ackCode, nullptr, nullptr, 2500) || ackCode != 0x00) {
+        Serial.printf("❌ R503 từ chối gửi ảnh: %s\n", r503GetStatusString(ackCode));
+        free(imgBuffer);
+        notifyStatus("FP_IMG_ERR");
+        return false;
+    }
+
+    // PHA 1: THU THẬP TẤT CẢ GÓI DỮ LIỆU TỪ UART VÀO RAM LIÊN TỤC VỚI XÁC THỰC CHECKSUM
     size_t totalBytesReceived = 0;
     bool finished = false;
     unsigned long startStream = millis();
+    int packetIndex = 0;
 
-    while (!finished && (millis() - startStream < 9000)) {
+    while (!finished && (totalBytesReceived < TOTAL_IMAGE_BYTES) && (millis() - startStream < 9000)) {
         if (cancelEnrollRequested) {
             free(imgBuffer);
             notifyStatus("FP_IMG_ERR");
             return false;
         }
 
-        // Tự động săn tìm Header 0xEF 0x01 của từng gói dữ liệu ảnh (chống rớt/lệch pha byte)
+        // 1. Đồng bộ Header 0xEF 0x01 cho từng gói tin (chống trôi byte và lệch pha 100%)
         if (!syncUartHeader(1500)) {
-            Serial.printf("⏱️ Kết thúc luồng nhận gói dữ liệu ảnh (đã nhận %u bytes)\n", totalBytesReceived);
+            Serial.printf("⏱️ Timeout tìm Header gói #%d (đã nhận %u bytes)\n", packetIndex, totalBytesReceived);
             break;
         }
 
-        // Đọc 7 bytes tiếp theo: Addr (4) + PID (1) + Length (2)
-        uint8_t pktHeader[7];
-        if (!readUartBytes(pktHeader, 7, 1000)) {
-            Serial.println("❌ Lỗi đọc phần còn lại của header gói dữ liệu ảnh");
+        // 2. Đọc 7 bytes còn lại của Header: Addr (4) + PID (1) + Length (2)
+        uint8_t hdr[7];
+        if (!readUartBytes(hdr, 7, 800)) {
+            Serial.printf("❌ Lỗi đọc 7 bytes Header gói #%d\n", packetIndex);
             break;
         }
 
-        uint8_t pid = pktHeader[4]; // 0x02 = Data, 0x08 = EndData
-        uint16_t length = ((uint16_t)pktHeader[5] << 8) | pktHeader[6];
+        uint8_t pid = hdr[4]; // 0x02 = Data, 0x08 = EndData
+        uint16_t length = ((uint16_t)hdr[5] << 8) | hdr[6];
 
         if (length < 2 || length > 300) {
-            Serial.printf("⚠️ Chiều dài gói dữ liệu bất thường (%d), bỏ qua...\n", length);
-            continue;
+            Serial.printf("⚠️ Chiều dài gói #%d bất thường (%d), ngắt luồng an toàn!\n", packetIndex, length);
+            break;
         }
 
         uint16_t payloadLen = length - 2; // Trừ đi 2 bytes checksum
 
-        // Đọc Payload ảnh trực tiếp vào RAM buffer
-        if (totalBytesReceived + payloadLen <= MAX_IMG_BYTES) {
-            if (!readUartBytes(imgBuffer + totalBytesReceived, payloadLen, 1000)) {
-                Serial.println("❌ Lỗi đọc payload ảnh từ UART");
-                break;
-            }
-            totalBytesReceived += payloadLen;
-        } else {
-            uint8_t dummy[256];
-            readUartBytes(dummy, payloadLen, 1000);
+        // 3. Đọc Payload ảnh trực tiếp vào RAM buffer
+        if (totalBytesReceived + payloadLen > MAX_IMG_BYTES) {
+            Serial.println("⚠️ Vượt kích thước đệm RAM tối đa!");
+            break;
         }
 
-        // Đọc 2 bytes Checksum
-        uint8_t chk[2];
-        readUartBytes(chk, 2, 500);
+        if (!readUartBytes(imgBuffer + totalBytesReceived, payloadLen, 1000)) {
+            Serial.printf("❌ Lỗi đọc payload ảnh gói #%d từ UART\n", packetIndex);
+            break;
+        }
 
-        if (pid == R503_PID_END_DATA) {
+        // 4. Đọc 2 bytes Checksum
+        uint8_t chk[2];
+        if (!readUartBytes(chk, 2, 800)) {
+            Serial.printf("❌ Lỗi đọc checksum gói ảnh #%d từ UART\n", packetIndex);
+            break;
+        }
+
+        // 5. Kiểm tra Checksum toàn vẹn từng gói tin
+        uint16_t expectedChk = pid + (uint16_t)(length >> 8) + (uint16_t)(length & 0xFF);
+        for (uint16_t i = 0; i < payloadLen; i++) {
+            expectedChk += imgBuffer[totalBytesReceived + i];
+        }
+        uint16_t receivedChk = ((uint16_t)chk[0] << 8) | chk[1];
+        if (expectedChk != receivedChk) {
+            Serial.printf("⚠️ Cảnh báo Checksum gói #%d (Tính: 0x%04X, Nhận: 0x%04X)\n", packetIndex, expectedChk, receivedChk);
+        }
+
+        totalBytesReceived += payloadLen;
+        packetIndex++;
+
+        if (pid == R503_PID_END_DATA || totalBytesReceived >= TOTAL_IMAGE_BYTES) {
             finished = true;
             break;
         }
     }
 
-    Serial.printf("📥 Đã nhận từ R503: %u bytes trong %lums!\n", totalBytesReceived, millis() - startStream);
+    Serial.printf("📥 Đã nhận từ R503: %u bytes (%d gói) trong %lums!\n", totalBytesReceived, packetIndex, millis() - startStream);
 
-    if (totalBytesReceived < 500) {
+    if (totalBytesReceived < 1000) {
         Serial.printf("❌ Dữ liệu ảnh thu được quá ít (%u bytes), hủy truyền\n", totalBytesReceived);
         free(imgBuffer);
         notifyStatus("FP_IMG_ERR");
         return false;
     }
 
-    // PHA 2: TRUYỀN DỮ LIỆU ĐÃ ĐỆM TRONG RAM QUA BLE THEO TỪNG CHUNK BASE64
-    notifyStatus("FP_IMG_START|192|192");
-    vTaskDelay(pdMS_TO_TICKS(40));
+    // PHA 2: TRUYỀN DỮ LIỆU ĐÃ ĐỆM TRONG RAM QUA BLE THEO TỪNG CHUNK CÓ INDEX ĐỘC LẬP
+    const size_t CHUNK_SIZE = 96; // 96 bytes thô -> 128 Base64 chars (bội số của 3, không padding '=')
+    const int TOTAL_EXPECTED_CHUNKS = 192; // 18432 bytes / 96 = 192 chunks chuẩn cho lăng kính 192x192
+    int totalChunks = (totalBytesReceived + CHUNK_SIZE - 1) / CHUNK_SIZE;
+    if (totalChunks < TOTAL_EXPECTED_CHUNKS) totalChunks = TOTAL_EXPECTED_CHUNKS;
+
+    notifyStatus("FP_IMG_START|192|192|" + String(totalChunks));
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     unsigned char base64Buf[256];
     int packetCount = 0;
-    const size_t CHUNK_SIZE = 96; // Bội số của 3 (96 bytes = 32 triplets -> 128 Base64 chars, TUYỆT ĐỐI KHÔNG sinh padding '=' ở giữa luồng)
 
     for (size_t offset = 0; offset < totalBytesReceived; offset += CHUNK_SIZE) {
         if (cancelEnrollRequested || !deviceConnected) {
@@ -840,14 +888,16 @@ bool streamR503ImageOverBle() {
         mbedtls_base64_encode(base64Buf, sizeof(base64Buf), &olen, imgBuffer + offset, curLen);
         base64Buf[olen] = '\0';
 
-        notifyStatus("FP_IMG_CHUNK|" + String((char *)base64Buf));
+        // Giao thức indexed chunk: FP_IMG_CHUNK|<seq>|<total>|<base64>
+        String chunkMsg = "FP_IMG_CHUNK|" + String(packetCount) + "|" + String(totalChunks) + "|" + String((char *)base64Buf);
+        notifyStatus(chunkMsg);
         packetCount++;
-        vTaskDelay(pdMS_TO_TICKS(20)); // Giãn cách 20ms an toàn cho BLE stack
+        vTaskDelay(pdMS_TO_TICKS(35)); // Giãn cách 35ms tối ưu cho BLE queue và tránh nghẽn Android
     }
 
     free(imgBuffer);
-    notifyStatus("FP_IMG_END");
-    Serial.printf("✅ Đã phát sóng xong toàn bộ ảnh (%d chunks, %u bytes) qua BLE!\n", packetCount, totalBytesReceived);
+    notifyStatus("FP_IMG_END|" + String(totalBytesReceived));
+    Serial.printf("✅ Đã phát sóng xong toàn bộ ảnh (%d/%d chunks, %u bytes) qua BLE!\n", packetCount, totalChunks, totalBytesReceived);
     return true;
 }
 
@@ -1301,7 +1351,8 @@ void startCaptureImageTask() {
         isCapturingImage = false;
     }
     cancelEnrollRequested = false;
-    xTaskCreate(captureImageTask, "capImgTask", 4096, NULL, 1, &captureImageTaskHandle);
+    isCapturingImage = true; // Khóa ngay lập tức loop() và handleFingerprintTouch() không tranh chấp UART R503
+    xTaskCreate(captureImageTask, "capImgTask", 8192, NULL, 1, &captureImageTaskHandle);
 }
 
 // Xóa vân tay theo ID (xóa cả ID chính và các slot phụ liên kết)
@@ -1600,6 +1651,8 @@ void handleFingerprintTouch() {
             delay(50);
         }
         delay(200);
+        pendingIdleLedUpdate = false;
+        updateIdleLed();
     } else {
         // VÂN TAY KHÔNG KHỚP HOẶC KHÔNG HỢP LỆ
         if (matched && !isRegistered) {
@@ -1681,13 +1734,26 @@ void processIncomingCommand(String data) {
     String providedKey = data.substring(0, firstPipe);
     String remaining = data.substring(firstPipe + 1);
 
-    // Kiểm tra Secret Key
+    // Kiểm tra Secret Key & Lớp chống dò mã (Anti-Brute-Force)
+    static int consecutiveWrongKey = 0;
     if (providedKey != SECRET_KEY) {
         Serial.println("Sai mã bảo mật!");
+        consecutiveWrongKey++;
         notifyStatus("LOI_SAI_KEY");
         ledError();
+        if (consecutiveWrongKey >= 3) {
+            consecutiveWrongKey = 0;
+            Serial.println("🚨 BÁO ĐỘNG: Nhập sai Secret Key 3 lần liên tiếp! Chủ động ngắt kết nối BLE.");
+            if (pServer) {
+                std::vector<uint16_t> peers = pServer->getPeerDevices();
+                for (uint16_t connId : peers) {
+                    pServer->disconnect(connId);
+                }
+            }
+        }
         return;
     }
+    consecutiveWrongKey = 0;
 
     int secondPipe = remaining.indexOf('|');
     String cmd = (secondPipe == -1) ? remaining : remaining.substring(0, secondPipe);
@@ -1709,9 +1775,18 @@ void processIncomingCommand(String data) {
     else if (cmd == "9" && params.length() > 0) { // Đổi mã bảo mật
         SECRET_KEY = params;
         prefsSecurity.putString("master_key", SECRET_KEY);
-        Serial.println("Đã đổi SECRET_KEY thành: " + SECRET_KEY);
+        uint32_t newPasskey = SECRET_KEY.toInt();
+        if (newPasskey == 0 && SECRET_KEY != "000000") newPasskey = 271000;
+        NimBLEDevice::setSecurityPasskey(newPasskey);
+        Serial.println("Đã đổi SECRET_KEY & Passkey BLE thành: " + SECRET_KEY);
         notifyStatus("DA_DOI_KEY");
         beep(2, 100);
+    }
+    else if (cmd == "UNPAIR_ALL") { // Xóa toàn bộ danh sách Bonding
+        Serial.println("🛡️ Yêu cầu thu hồi & xóa sạch toàn bộ thiết bị đã Bonding (Unpair All)...");
+        NimBLEDevice::deleteAllBonds();
+        notifyStatus("UNPAIR_ALL_OK");
+        beep(3, 80);
     }
 
     // --- CÁC LỆNH QUẢN LÝ VÂN TAY ---
@@ -1932,10 +2007,12 @@ void processIncomingCommand(String data) {
 // ==========================================
 
 class ServerCallbacks : public NimBLEServerCallbacks {
-    void onConnect(NimBLEServer *pServer) {
+    void onConnect(NimBLEServer *pServer) override {
         deviceConnected = true;
         Serial.println("BLE Client đã kết nối!");
         setR503Led(FINGERPRINT_LED_FLASHING, FINGERPRINT_LED_BLUE, 50, 1);
+        pendingIdleLedUntil = millis() + 400; // Sau 1 nháy kết nối BLE, tự khôi phục màu đèn trạng thái xe
+        pendingIdleLedUpdate = true;
         notifyStatus(isUnlocked ? "STATUS|1" : "STATUS|0");
         sendTelemetry();
         delay(40);
@@ -1946,7 +2023,34 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         sendLedConfigResponse();
     }
 
-    void onDisconnect(NimBLEServer *pServer) {
+    uint32_t onPassKeyRequest() override {
+        Serial.println("🔑 BLE SMP: Nhận yêu cầu Passkey từ thiết bị Client...");
+        uint32_t passkey = SECRET_KEY.toInt();
+        if (passkey == 0 && SECRET_KEY != "000000") passkey = 271000;
+        return passkey;
+    }
+
+    bool onConfirmPIN(uint32_t pin) override {
+        Serial.printf("🔢 BLE SMP: Xác nhận Passkey %06u\n", pin);
+        uint32_t myPin = SECRET_KEY.toInt();
+        if (myPin == 0 && SECRET_KEY != "000000") myPin = 271000;
+        return (pin == myPin);
+    }
+
+    void onAuthenticationComplete(ble_gap_conn_desc* desc) override {
+        if (desc->sec_state.encrypted) {
+            Serial.printf("🔒 BLE SMP: Ghép đôi (Bonding) THÀNH CÔNG! Đã mã hóa AES-128 (Authen=%d, Bonded=%d)\n",
+                          desc->sec_state.authenticated, desc->sec_state.bonded);
+            beep(1, 100);
+        } else {
+            Serial.println("❌ BLE SMP: Ghép đôi THẤT BẠI hoặc người dùng nhập sai PIN! Chủ động ngắt kết nối.");
+            if (pServer) {
+                pServer->disconnect(desc->conn_handle);
+            }
+        }
+    }
+
+    void onDisconnect(NimBLEServer *pServer) override {
         deviceConnected = false;
         Serial.println("BLE Client đã ngắt kết nối.");
 
@@ -2096,10 +2200,19 @@ void setup() {
         Serial.println("⚠️ Không tìm thấy cảm biến R503 ở mọi baudrate! Kiểm tra lại dây RX(GPIO 0)/TX(GPIO 1) và nguồn 3.3V.");
     }
 
-    // 4. Khởi tạo NimBLE Server
+    // 4. Khởi tạo NimBLE Server & Cấu hình SMP Security (Pairing, Bonding, Passkey AES-128)
     NimBLEDevice::init(DEVICE_NAME);
     NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Mức phát sóng BLE tối đa
     NimBLEDevice::setMTU(517);              // Đặt MTU tối đa để tránh cắt cụt gói tin BLE payload
+
+    // 🔐 CẤU HÌNH BẢO MẬT SMP: BONDING + MITM + SECURE CONNECTIONS (LESC P-256)
+    NimBLEDevice::setSecurityAuth(true, true, true);
+    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_DISPLAY_ONLY); // Xe hiển thị PIN / mã cố định, điện thoại nhập PIN
+    uint32_t initialPasskey = SECRET_KEY.toInt();
+    if (initialPasskey == 0 && SECRET_KEY != "000000") initialPasskey = 271000;
+    NimBLEDevice::setSecurityPasskey(initialPasskey);
+    NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
+    NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
 
     pServer = NimBLEDevice::createServer();
     pServer->setCallbacks(new ServerCallbacks());
@@ -2108,7 +2221,11 @@ void setup() {
     pCharacteristic = pService->createCharacteristic(
         CHARACTERISTIC_UUID,
         NIMBLE_PROPERTY::READ | 
+        NIMBLE_PROPERTY::READ_ENC | 
+        NIMBLE_PROPERTY::READ_AUTHEN | 
         NIMBLE_PROPERTY::WRITE | 
+        NIMBLE_PROPERTY::WRITE_ENC | 
+        NIMBLE_PROPERTY::WRITE_AUTHEN | 
         NIMBLE_PROPERTY::WRITE_NR | 
         NIMBLE_PROPERTY::NOTIFY
     );
@@ -2128,8 +2245,8 @@ void setup() {
 }
 
 void loop() {
-    // Nếu đang trong chu trình thêm vân tay mới từ App thì bỏ qua quét thông thường
-    if (isEnrolling) {
+    // Nếu đang trong chu trình thêm vân tay mới hoặc chụp ảnh từ App thì bỏ qua quét thông thường
+    if (isEnrolling || isCapturingImage) {
         delay(50);
         return;
     }
@@ -2159,10 +2276,16 @@ void loop() {
         updateIdleLed();
     }
 
+    // Tự động khôi phục chế độ đèn Aura LED Idle (Xe Mở / Xe Khóa) sau khi nháy xác nhận
+    if (pendingIdleLedUpdate && millis() >= pendingIdleLedUntil) {
+        pendingIdleLedUpdate = false;
+        updateIdleLed();
+    }
+
     // Kiểm tra chạm ngón tay (Active LOW: Chạm = 0V / LOW trên chân WAKE)
     static unsigned long lastTouchTrigger = 0;
     bool wakeTriggered = (digitalRead(R503_WAKE_PIN) == LOW) || (digitalRead(2) == LOW);
-    if (r503Ready && wakeTriggered && (millis() - lastTouchTrigger > 800)) {
+    if (r503Ready && !isCapturingImage && !isEnrolling && wakeTriggered && (millis() - lastTouchTrigger > 800)) {
         lastTouchTrigger = millis();
         handleFingerprintTouch();
     }

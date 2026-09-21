@@ -115,6 +115,10 @@ class MainActivity : AppCompatActivity() {
     private var cvEnrollImageCardRef: CardView? = null
     private var ivEnrollFingerprintImageRef: ImageView? = null
     private var enrollImageBuffer = StringBuilder()
+    private val indexedImageChunks = java.util.concurrent.ConcurrentHashMap<Int, ByteArray>()
+    private var expectedTotalChunks: Int = 192
+    private var incomingImageWidth: Int = 192
+    private var incomingImageHeight: Int = 192
 
     // Quản lý Chế độ Chống Nước Mưa (Anti-Rain Mode)
     private var isRainEnabled = false
@@ -192,6 +196,54 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Bộ lắng nghe sự kiện Ghép Đôi Phần Cứng (BLE SMP Bonding & Pairing)
+    private val bondStateReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: android.content.Intent?) {
+            if (intent?.action == BluetoothDevice.ACTION_BOND_STATE_CHANGED) {
+                val bondState = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.BOND_NONE)
+                val prevBondState = intent.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.BOND_NONE)
+                val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                }
+                val currentMac = if (isBleMode) BleManager.activeMac else BluetoothController.deviceMac
+                if (device != null && currentMac != null && device.address.equals(currentMac, ignoreCase = true)) {
+                    handleBondStateChanged(bondState, prevBondState)
+                }
+            }
+        }
+    }
+
+    private fun handleBondStateChanged(bondState: Int, prevBondState: Int) {
+        val tvStatus = findViewById<TextView?>(R.id.tvStatus)
+        when (bondState) {
+            BluetoothDevice.BOND_BONDING -> {
+                Log.i("BLE_SEC", "Bonding in progress...")
+                tvStatus?.text = "🔐 Đang ghép đôi... Nhập mã PIN 6 số"
+                tvStatus?.setTextColor(getColor(R.color.accent_amber))
+            }
+            BluetoothDevice.BOND_BONDED -> {
+                Log.i("BLE_SEC", "Bonding successful! Hardware AES-128 active.")
+                tvStatus?.text = "BLE CONNECTED • Mã hóa AES-128"
+                tvStatus?.setTextColor(getColor(R.color.secondary_teal))
+                Toast.makeText(this, "🟢 Đã ghép đôi thành công! Kết nối được mã hóa AES-128.", Toast.LENGTH_LONG).show()
+                triggerHapticFeedback()
+                requestFingerprintList()
+            }
+            BluetoothDevice.BOND_NONE -> {
+                if (prevBondState == BluetoothDevice.BOND_BONDING) {
+                    Log.w("BLE_SEC", "Bonding failed or cancelled by user.")
+                    tvStatus?.text = "❌ Ghép đôi thất bại / Sai mã PIN!"
+                    tvStatus?.setTextColor(getColor(R.color.accent_danger))
+                    Toast.makeText(this, "❌ Ghép đôi thất bại! Vui lòng nhập đúng mã PIN xe.", Toast.LENGTH_LONG).show()
+                    triggerHapticFeedback()
+                }
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -203,8 +255,10 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        // Khởi tạo BleManager
+        // Khởi tạo BleManager & Đăng ký Receiver theo dõi Bonding
         BleManager.init(this)
+        val bondFilter = android.content.IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+        registerReceiver(bondStateReceiver, bondFilter)
 
         loadDevice()
 
@@ -439,6 +493,23 @@ class MainActivity : AppCompatActivity() {
             } else {
                 Toast.makeText(this, "Hãy kết nối xe trước khi đổi mã", Toast.LENGTH_SHORT).show()
             }
+        }
+
+        val btnUnpairAllBle = findViewById<View?>(R.id.btnUnpairAllBle)
+        btnUnpairAllBle?.setOnClickListener {
+            if (!isConnectedToVehicle()) {
+                Toast.makeText(this, "Hãy kết nối xe trước khi thu hồi quyền!", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            AlertDialog.Builder(this)
+                .setTitle("🛡️ Thu Hồi Toàn Bộ Quyền Ghép Đôi")
+                .setMessage("Bạn có chắc chắn muốn xóa toàn bộ danh sách điện thoại đã ghép đôi (Bonding) trên xe?\n\nSau khi xóa, bất kỳ điện thoại nào (kể cả máy phụ hoặc người khác) muốn điều khiển xe đều phải nhập lại mã PIN bảo mật.")
+                .setPositiveButton("Xóa Tất Cả") { _, _ ->
+                    sendVehicleCommand("UNPAIR_ALL")
+                    Toast.makeText(this, "Đang gửi lệnh thu hồi danh sách ghép đôi...", Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("Hủy", null)
+                .show()
         }
 
         btnViewHistory.setOnClickListener {
@@ -765,36 +836,83 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleVehicleFeedback(status: String) {
-        // 1. Nhận chunk Base64 ngầm: gom buffer trong background thread, KHÔNG đè Main UI Thread!
+        // 1. Nhận chunk ảnh: hỗ trợ cả định dạng mới có index (FP_IMG_CHUNK|<seq>|<total>|<b64>) và định dạng cũ
         if (status.startsWith("FP_IMG_CHUNK|")) {
-            val chunk = status.substringAfter("FP_IMG_CHUNK|").trim()
-            if (chunk.isNotEmpty()) {
+            val payload = status.substringAfter("FP_IMG_CHUNK|").trim()
+            val parts = payload.split("|", limit = 3)
+            if (parts.size >= 3) {
+                // Giao thức mới: FP_IMG_CHUNK|<seq>|<total>|<base64>
+                val seq = parts[0].toIntOrNull()
+                val tot = parts[1].toIntOrNull() ?: expectedTotalChunks
+                val b64 = parts[2].trim()
+                if (seq != null && b64.isNotEmpty()) {
+                    expectedTotalChunks = tot
+                    try {
+                        val decodedBytes = Base64.decode(b64, Base64.DEFAULT)
+                        if (decodedBytes != null && decodedBytes.isNotEmpty()) {
+                            indexedImageChunks[seq] = decodedBytes
+                        }
+                    } catch (e: Exception) {
+                        Log.w("FP_IMG", "Decode chunk $seq failed: ${e.message}")
+                    }
+                }
+            } else if (payload.isNotEmpty()) {
+                // Tương thích ngược: FP_IMG_CHUNK|<base64>
                 synchronized(enrollImageBuffer) {
-                    enrollImageBuffer.append(chunk)
+                    enrollImageBuffer.append(payload)
                 }
             }
             return
         }
 
-        // 2. Kết thúc nhận ảnh: Giải mã Base64 và xử lý Bitmap trong Thread riêng, giải phóng Main UI Thread
-        if (status == "FP_IMG_END") {
+        // 2. Kết thúc nhận ảnh: Giải mã và xử lý Bitmap trong Thread riêng, giải phóng Main UI Thread
+        if (status.startsWith("FP_IMG_END")) {
             Thread {
-                val fullB64: String
-                synchronized(enrollImageBuffer) {
-                    fullB64 = enrollImageBuffer.toString()
-                    enrollImageBuffer.setLength(0)
+                var decodedBmp: Bitmap? = null
+                if (indexedImageChunks.isNotEmpty()) {
+                    // ƯU TIÊN 1: Lắp ráp chính xác tuyệt đối theo index chunk (Chống trôi, chống đen/trắng lệch dòng 100%)
+                    val totalChunks = expectedTotalChunks.coerceAtLeast(1)
+                    val chunkSize = 96
+                    val expectedBytes = (incomingImageWidth * incomingImageHeight / 2).coerceAtLeast(18432)
+                    val rawBytes = ByteArray(expectedBytes)
+                    // Khởi tạo mảng bằng 0xFF (mức sáng nền mặc định của cảm biến R503 để không tạo sọc đen)
+                    java.util.Arrays.fill(rawBytes, 0xFF.toByte())
+
+                    var receivedChunksCount = 0
+                    for (seq in 0 until totalChunks) {
+                        val cBytes = indexedImageChunks[seq]
+                        if (cBytes != null) {
+                            receivedChunksCount++
+                            val targetOffset = seq * chunkSize
+                            val copyLen = Math.min(cBytes.size, expectedBytes - targetOffset)
+                            if (targetOffset < expectedBytes && copyLen > 0) {
+                                System.arraycopy(cBytes, 0, rawBytes, targetOffset, copyLen)
+                            }
+                        }
+                    }
+                    Log.i("FP_IMG", "✅ Đã lắp ráp trọn vẹn: $receivedChunksCount / $totalChunks chunks ($expectedBytes bytes)")
+                    indexedImageChunks.clear()
+                    synchronized(enrollImageBuffer) { enrollImageBuffer.setLength(0) }
+                    lastRawFingerprintBytes = rawBytes
+                    decodedBmp = decodeR503ImageToBitmap(rawBytes, incomingImageWidth, incomingImageHeight, isOpticalInvertMode)
+                } else {
+                    // ƯU TIÊN 2: Fallback giải mã chuỗi Base64 truyền thống
+                    val fullB64: String
+                    synchronized(enrollImageBuffer) {
+                        fullB64 = enrollImageBuffer.toString()
+                        enrollImageBuffer.setLength(0)
+                    }
+                    if (fullB64.isNotEmpty()) {
+                        try {
+                            decodedBmp = safeDecodeR503Base64ToBitmap(fullB64, incomingImageWidth, incomingImageHeight)
+                        } catch (e: Exception) {
+                            Log.e("FP_IMG", "Decode image error in background", e)
+                        }
+                    }
                 }
 
-                var decodedBmp: Bitmap? = null
-                if (fullB64.isNotEmpty()) {
-                    try {
-                        decodedBmp = safeDecodeR503Base64ToBitmap(fullB64, 192, 192)
-                        if (decodedBmp != null) {
-                            saveCachedFingerprintImage(decodedBmp)
-                        }
-                    } catch (e: Exception) {
-                        Log.e("FP_IMG", "Decode image error in background", e)
-                    }
+                if (decodedBmp != null) {
+                    saveCachedFingerprintImage(decodedBmp)
                 }
 
                 val bmp = decodedBmp
@@ -1003,16 +1121,21 @@ class MainActivity : AppCompatActivity() {
                     // Fallback
                 }
                 status.startsWith("FP_IMG_START") -> {
+                    val parts = status.split("|")
+                    incomingImageWidth = if (parts.size > 1) parts[1].toIntOrNull() ?: 192 else 192
+                    incomingImageHeight = if (parts.size > 2) parts[2].toIntOrNull() ?: 192 else 192
+                    expectedTotalChunks = if (parts.size > 3) parts[3].toIntOrNull() ?: 192 else 192
+                    indexedImageChunks.clear()
                     synchronized(enrollImageBuffer) {
                         enrollImageBuffer.setLength(0)
                     }
-                    tvEnrollStepDescRef?.text = "📸 Đang truyền ảnh vân tay từ cảm biến..."
+                    tvEnrollStepDescRef?.text = "📸 Đang truyền ảnh vân tay từ cảm biến ($expectedTotalChunks gói)..."
                     pbTabImageProgressRef?.visibility = View.VISIBLE
-                    tvTabImageStatusRef?.text = "📸 Đang nhận dữ liệu ảnh..."
+                    tvTabImageStatusRef?.text = "📸 Đang nhận dữ liệu ảnh ($expectedTotalChunks gói)..."
                     tvTabImageDescRef?.text = "Đang truyền các gói tin quang học qua Bluetooth..."
                     pbFpTestImageProgressRef?.visibility = View.VISIBLE
                     tvFpTestIdBadgeRef?.text = "NHẬN ẢNH"
-                    tvFpTestStatusRef?.text = "📸 Đang truyền dữ liệu ảnh từ lăng kính quang học R503..."
+                    tvFpTestStatusRef?.text = "📸 Đang truyền dữ liệu ảnh từ lăng kính quang học R503 ($expectedTotalChunks gói)..."
                 }
                 status == "FP_CAPTURE_WAIT" -> {
                     pbTabImageProgressRef?.visibility = View.VISIBLE
@@ -1187,6 +1310,10 @@ class MainActivity : AppCompatActivity() {
                         UnlockHistoryManager.TYPE_FINGERPRINT_FAIL,
                         "Vân tay không có trong hệ thống"
                     )
+                }
+                status == "UNPAIR_ALL_OK" -> {
+                    Toast.makeText(this, "🛡️ Đã xóa sạch toàn bộ thiết bị ghép đôi trên xe thành công!", Toast.LENGTH_LONG).show()
+                    triggerHapticFeedback()
                 }
 
                 // --- CHẾ ĐỘ CHỐNG NƯỚC MƯA (ANTI-RAIN MODE) ---
@@ -1554,6 +1681,7 @@ class MainActivity : AppCompatActivity() {
         cvEnrollImageCardRef = null
         ivEnrollFingerprintImageRef = null
         enrollImageBuffer.setLength(0)
+        indexedImageChunks.clear()
     }
 
     private fun showAddFingerprintDialog() {
@@ -2226,6 +2354,7 @@ class MainActivity : AppCompatActivity() {
         val hist = IntArray(16)
 
         // 1. Trích xuất các nibble 4-bit (16 mức xám: 0..15) từ byte UART
+        val validPixels = Math.min(totalPixels, maxBytes * 2)
         for (idx in 0 until maxBytes) {
             val b = rawBytes[idx].toInt() and 0xFF
             val p1 = (b ushr 4) and 0x0F
@@ -2241,8 +2370,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // 2. Tính toán ngưỡng Histogram Percentile (3% - 97%) để loại bỏ nhiễu biên ngoài lăng kính R503
-        val validPixels = Math.min(totalPixels, maxBytes * 2)
+        // 2. Tính toán ngưỡng Histogram Percentile (3% - 97%) để tối ưu dải tương phản thực tế
         val clipLower = (validPixels * 0.03).toInt()
         val clipUpper = (validPixels * 0.97).toInt()
 
@@ -2269,10 +2397,10 @@ class MainActivity : AppCompatActivity() {
 
         val range = (highBound - lowBound).coerceAtLeast(1)
 
-        // 3. Kéo giãn tương phản toàn dải kết hợp đường cong Sigmoid / S-Curve làm sắc nét vân tay
+        // 3. Kéo giãn tương phản tuyến tính chính xác theo đặc tính cảm biến R503
         for (i in 0 until totalPixels) {
             if (i >= validPixels) {
-                pixels[i] = if (!invert) 0xFFF0F0F0.toInt() else 0xFF0D1117.toInt()
+                pixels[i] = if (!invert) 0xFFFFFFFF.toInt() else 0xFF000000.toInt()
                 continue
             }
             val raw = rawNibbles[i]
@@ -2280,25 +2408,19 @@ class MainActivity : AppCompatActivity() {
             // Chuẩn hóa mức xám trong khoảng 0.0 .. 1.0 theo dải vân tay thực tế
             val norm = ((raw - lowBound).toFloat() / range).coerceIn(0f, 1f)
 
-            // Áp dụng hàm S-Curve phi tuyến tính để đẩy mạnh độ dốc giữa đỉnh vân (ridge) và rãnh vân (valley)
-            val enhanced = if (norm < 0.5f) {
-                2f * norm * norm
-            } else {
-                1f - 2f * (1f - norm) * (1f - norm)
-            }
-
             if (!invert) {
                 // CHUẨN QUANG HỌC NÉT CAO (Optical Clear - Chuẩn phòng Lab):
-                // Nền kính sáng sạch sẽ (240..255), đường vân tay màu đen sẫm sắc nét rõ từng chi tiết (0..50)
-                val gray = (enhanced * 255f).toInt().coerceIn(0, 255)
+                // R503 ra mức thấp (0..4) = Đỉnh vân (Ridges) -> Vẽ màu đen sẫm (gray thấp ~ 0..30)
+                // R503 ra mức cao (11..15) = Rãnh vân & Nền (Valleys) -> Vẽ màu trắng sáng (gray cao ~ 230..255)
+                val gray = (norm * 255f).toInt().coerceIn(0, 255)
                 pixels[i] = (0xFF shl 24) or (gray shl 16) or (gray shl 8) or gray
             } else {
                 // CHẾ ĐỘ BIOMETRIC NEON (High-Tech Scanner):
                 // Nền tối sâu, đường vân tay phát sáng vàng kim biometric nổi bật
-                val inv = (255f * (1f - enhanced)).toInt().coerceIn(0, 255)
-                val r = (inv * 0.98f).toInt().coerceIn(0, 255)
-                val g = (inv * 0.82f).toInt().coerceIn(0, 255)
-                val b = (inv * 0.40f).toInt().coerceIn(0, 255)
+                val inv = 1f - norm
+                val r = (inv * 255f).toInt().coerceIn(0, 255)
+                val g = (inv * 210f).toInt().coerceIn(0, 255)
+                val b = (inv * 90f).toInt().coerceIn(0, 255)
                 pixels[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
             }
         }
@@ -2415,6 +2537,7 @@ class MainActivity : AppCompatActivity() {
     private fun startLiveFingerprintCapture() {
         isCapturingLiveImage = true
         enrollImageBuffer.setLength(0)
+        indexedImageChunks.clear()
         pbTabImageProgressRef?.visibility = View.VISIBLE
         tvTabImageStatusRef?.text = "📸 Đang chờ chạm ngón tay..."
         tvTabImageDescRef?.text = "Đèn cảm biến đang sáng tím. Hãy áp ngón tay và giữ êm trên R503."
@@ -2877,7 +3000,13 @@ class MainActivity : AppCompatActivity() {
             viewConnectionDot?.setBackgroundResource(R.drawable.badge_dot_green)
             val tvTitle = findViewById<TextView>(R.id.tvTitle)
             tvTitle?.text = vehicleCustomName
-            tvStatus.text = "BLE CONNECTED • Đã kết nối"
+            if (isBleMode && BleManager.isBonded) {
+                tvStatus.text = "BLE CONNECTED • Mã hóa AES-128"
+            } else if (isBleMode) {
+                tvStatus.text = "BLE CONNECTED • Đang chờ ghép đôi"
+            } else {
+                tvStatus.text = "CONNECTED • Đã kết nối"
+            }
             tvStatus.setTextColor(getColor(R.color.secondary_teal))
             btnConnect.text = getString(R.string.btn_disconnect_bt)
             tvFpSensorStatus?.text = "Cảm biến R503: Sẵn sàng hoạt động"
@@ -3000,6 +3129,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        try {
+            unregisterReceiver(bondStateReceiver)
+        } catch (e: Exception) {
+            Log.e("BLE_SEC", "Error unregistering bondStateReceiver", e)
+        }
         handler.removeCallbacks(rssiPollRunnable)
         disconnectVehicle()
     }

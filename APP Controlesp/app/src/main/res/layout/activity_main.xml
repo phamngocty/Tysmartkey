@@ -1584,6 +1584,17 @@
                         android:layout_marginBottom="8dp" />
 
                     <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnUnpairAllBle"
+                        android:layout_width="match_parent"
+                        android:layout_height="44dp"
+                        android:background="@drawable/header_icon_btn_bg"
+                        android:text="🛡️ Thu Hồi &amp; Xóa Tất Cả Điện Thoại Ghép Đôi"
+                        android:textAllCaps="false"
+                        android:textColor="@color/white"
+                        android:textSize="13sp"
+                        android:layout_marginBottom="8dp" />
+
+                    <androidx.appcompat.widget.AppCompatButton
                         android:id="@+id/btnClearAllFp"
                         android:layout_width="match_parent"
                         android:layout_height="44dp"

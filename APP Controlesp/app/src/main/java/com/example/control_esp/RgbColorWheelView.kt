@@ -123,16 +123,16 @@ class RgbColorWheelView @JvmOverloads constructor(
         centerBorderPaint.color = if (isWhiteSelected) 0xFFFFC107.toInt() else 0xFF475569.toInt()
         canvas.drawCircle(cx, cy, centerRadius, centerBorderPaint)
 
-        // Chữ ở tâm hiển thị màu đang chọn
-        val curInfo = getColorInfo(currentColorIndex)
-        textPaint.color = if (isWhiteSelected) 0xFF0F172A.toInt() else curInfo.hex
+        // Nút tâm luôn hiển thị rõ là nút chọn màu Trắng (tránh gây nhầm lẫn là nút Xanh khi đang chọn Xanh)
+        textPaint.color = if (isWhiteSelected) 0xFF0F172A.toInt() else 0xFF94A3B8.toInt()
         canvas.drawText(
-            if (isWhiteSelected) "TRẮNG" else curInfo.name.substringBefore(" ("),
+            if (isWhiteSelected) "✓ TRẮNG" else "⚪ TRẮNG",
             cx, cy + (4f * density), textPaint
         )
 
         // 3. Vẽ con trỏ chọn màu (Thumb Glow)
         if (!isWhiteSelected) {
+            val curInfo = getColorInfo(currentColorIndex)
             val rad = Math.toRadians(currentAngleDeg.toDouble())
             val tx = cx + outerRadius * cos(rad).toFloat()
             val ty = cy + outerRadius * sin(rad).toFloat()
