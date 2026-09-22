@@ -3,19 +3,23 @@
 #include <Preferences.h>
 #include <Adafruit_Fingerprint.h>
 #include <mbedtls/base64.h>
+#include <esp_sleep.h>
 
 // ==========================================
 // 📌 1. ĐỊNH NGHĨA CHÂN PHẦN CỨNG (ESP32-C3)
 // ==========================================
-#define RELAY1_PIN   4  // Relay 1: Khóa điện ACC (Đấu song song ổ khóa cơ)
-#define RELAY2_PIN   5  // Relay 2: Đề xe (Starter)
-#define RELAY3_PIN   6  // Relay 3: Đèn / Còi (Buzzer / Horn / Turn lights)
+#define RELAY1_PIN         6  // Relay 1: Khóa điện ACC (Đấu song song ổ khóa cơ)
+#define RELAY2_PIN         7  // Relay 2: Đề xe (Starter)
+#define RELAY3_PIN         10 // Relay 3: Đèn / Còi (Buzzer / Horn / Turn lights)
 
-#define RF_LOCATE_PIN      7  // GPIO 7: Tín hiệu từ Module RF 433MHz (CHỈ DÙNG TÌM XE - TUYỆT ĐỐI KHÔNG MỞ KHÓA)
+#define R503_WAKE_PIN      2  // GPIO 2: WAKEUP cảm ứng chạm R503 (RTC Wakeup, Active LOW: chạm = 0V)
+#define SW420_VIBRATE_PIN  3  // GPIO 3: Cảm biến rung SW-420 (RTC Wakeup, Active LOW khi rung)
+#define RF_LOCATE_PIN      4  // GPIO 4: Module RF 433MHz VT qua transistor đảo (RTC Wakeup, Active LOW)
 
 #define R503_RX_PIN        0  // GPIO 0 kết nối TXD (dây Vàng) của R503
 #define R503_TX_PIN        1  // GPIO 1 kết nối RXD (dây Xanh lá) của R503
-#define R503_WAKE_PIN      3  // GPIO 3 kết nối WAKEUP (dây Xanh dương) của R503 (Active LOW: chạm = 0V)
+
+#define ONBOARD_LED_PIN    8  // GPIO 8: Đèn LED xanh Onboard ESP32-C3 Super Mini (Active LOW)
 
 // ==========================================
 // 🔐 2. THÔNG SỐ BẢO MẬT & BLE UUID
@@ -97,6 +101,23 @@ unsigned long testFpUntil = 0;
 // Bộ hẹn giờ tự động chuyển về màu đèn trạng thái xe (updateIdleLed) sau hiệu ứng nháy
 bool pendingIdleLedUpdate = false;
 unsigned long pendingIdleLedUntil = 0;
+
+// ==========================================
+// 💤 QUẢN LÝ NGUỒN 2 TẦNG (POWER MANAGEMENT)
+// ==========================================
+unsigned long lastActivityTime = 0;
+const unsigned long DEEP_SLEEP_TIMEOUT_MS = 24ULL * 60ULL * 60ULL * 1000ULL; // 24 giờ = 86,400,000 ms
+bool isPowerSavingAdvertising = false;
+bool wakeTriggeredByFingerprint = false;
+bool wakeTriggeredByVibration = false;
+bool wakeTriggeredByRf = false;
+
+// Khai báo trước các hàm quản lý nguồn & hành động
+void updateBleAdvertisingMode(bool fast);
+void enterTier2DeepSleep();
+void handleVibrationDetected();
+void handleFingerprintTouch();
+void triggerLocate();
 
 // ==========================================
 // 🔔 3. HÀM PHẢN HỒI & HIỆU ỨNG (FEEDBACK)
@@ -627,8 +648,9 @@ void printMenu() {
     Serial.println("  [6] Chụp ảnh và đối soát ngón tay vừa chạm (0x01 -> 0x04)");
     Serial.println("  [7] Trích xuất ảnh quang học lăng kính (0x0A)");
     Serial.println("  [8] Xóa toàn bộ bộ nhớ vân tay (0x0D)");
+    Serial.println("  [9] Kích hoạt ngay Tầng 2: Deep Sleep (Test dòng rò & ngắt RTC)");
     Serial.println("==============================================================");
-    Serial.print("👉 Nhập số lựa chọn (1-8): ");
+    Serial.print("👉 Nhập số lựa chọn (1-9): ");
 }
 
 // ==========================================
@@ -638,6 +660,8 @@ void printMenu() {
 void setVehicleUnlock(bool unlock, bool saveFlash = true, bool notify = true) {
     isUnlocked = unlock;
     digitalWrite(RELAY1_PIN, isUnlocked ? HIGH : LOW);
+    lastActivityTime = millis();
+    updateBleAdvertisingMode(unlock);
     
     if (saveFlash) {
         prefsSecurity.putBool("is_unlocked", isUnlocked);
@@ -666,6 +690,7 @@ void setVehicleUnlock(bool unlock, bool saveFlash = true, bool notify = true) {
 
 // Đề xe (chỉ khi xe đang mở khóa)
 void triggerStarter() {
+    lastActivityTime = millis();
     if (!isUnlocked) {
         notifyStatus("LOI_CHUA_MO_KHOA");
         beep(3, 60);
@@ -679,14 +704,107 @@ void triggerStarter() {
 
 // Tìm xe: Nháy xi-nhan + còi 3 nhịp ngắn chuẩn xe cao cấp
 void triggerLocate() {
+    lastActivityTime = millis();
     Serial.println("Đang phát tín hiệu tìm xe (3 nhịp bíp & nháy đèn)...");
     for (int i = 0; i < 3; i++) {
         digitalWrite(RELAY3_PIN, HIGH);
+        digitalWrite(ONBOARD_LED_PIN, LOW);
         delay(200);
         digitalWrite(RELAY3_PIN, LOW);
+        digitalWrite(ONBOARD_LED_PIN, HIGH);
         if (i < 2) delay(150);
     }
     notifyStatus("DA_TIM_XE");
+}
+
+// ==========================================
+// 💤 4.1. QUẢN LÝ TIẾT KIỆM NĂNG LƯỢNG 2 TẦNG
+// ==========================================
+
+// Cấu hình tần số quảng bá BLE: Nhanh (Fast: 100-200ms) hoặc Tiết kiệm Tầng 1 (Power Saving: 1280ms)
+void updateBleAdvertisingMode(bool fast) {
+    NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
+    if (!pAdvertising) return;
+    
+    // Nếu đang có thiết bị kết nối thì không thay đổi quảng bá ngắt quãng
+    if (deviceConnected && !fast) return;
+
+    if (pAdvertising->isAdvertising()) {
+        pAdvertising->stop();
+    }
+    
+    if (fast) {
+        // Fast mode: 100ms - 200ms (160 - 320 đơn vị 0.625ms)
+        pAdvertising->setMinInterval(160);
+        pAdvertising->setMaxInterval(320);
+        isPowerSavingAdvertising = false;
+        Serial.println("⚡ [BLE] Chế độ quảng bá: FAST (100ms - 200ms)");
+    } else {
+        // Tầng 1 Power Saving: 1280ms (2048 đơn vị 0.625ms = 1.28s)
+        pAdvertising->setMinInterval(2048);
+        pAdvertising->setMaxInterval(2048);
+        isPowerSavingAdvertising = true;
+        Serial.println("🍃 [BLE] TẦNG 1: Chế độ quảng bá TIẾT KIỆM PIN (1280ms / 1.28s)");
+    }
+    pAdvertising->start();
+}
+
+// Xử lý báo động khi cảm biến rung SW-420 phát hiện rung lắc lúc xe đang khóa
+void handleVibrationDetected() {
+    if (isUnlocked) {
+        // Xe đang mở khóa và di chuyển -> Bỏ qua ngắt rung để tránh báo động giả
+        return;
+    }
+    Serial.println("🚨 [ALARM] Cảm biến rung SW-420 phát hiện rung lắc khi xe đang khóa!");
+    notifyStatus("CANH_BAO_RUNG");
+    
+    // Báo động nhẹ 3 nhịp còi / xi-nhan cảnh báo kẻ gian
+    for (int i = 0; i < 3; i++) {
+        digitalWrite(RELAY3_PIN, HIGH);
+        digitalWrite(ONBOARD_LED_PIN, LOW); // Bật LED xanh onboard
+        delay(70);
+        digitalWrite(RELAY3_PIN, LOW);
+        digitalWrite(ONBOARD_LED_PIN, HIGH); // Tắt LED xanh onboard
+        if (i < 2) delay(80);
+    }
+}
+
+// Kích hoạt Tầng 2: Deep Sleep (Siêu tiết kiệm pin sau 24h hoặc qua lệnh từ App)
+void enterTier2DeepSleep() {
+    Serial.println("\n==============================================================");
+    Serial.println("   💤 [POWER] KÍCH HOẠT TẦNG 2: DEEP SLEEP (SIÊU TIẾT KIỆM)   ");
+    Serial.println("==============================================================");
+    
+    // 1. Tắt đèn Aura LED trên R503 để triệt tiêu dòng rò
+    if (r503Ready) {
+        r503SetAuraLed(LED_MODE_OFF, 0, 0, 0);
+        delay(60);
+    }
+    
+    // 2. Đảm bảo trạng thái Relay an toàn và tắt LED Onboard
+    digitalWrite(RELAY1_PIN, isUnlocked ? HIGH : LOW);
+    digitalWrite(RELAY2_PIN, LOW);
+    digitalWrite(RELAY3_PIN, LOW);
+    digitalWrite(ONBOARD_LED_PIN, HIGH); // Active LOW: HIGH = TẮT
+    
+    // 3. Tắt hoàn toàn khối BLE
+    if (NimBLEDevice::getAdvertising() && NimBLEDevice::getAdvertising()->isAdvertising()) {
+        NimBLEDevice::getAdvertising()->stop();
+    }
+    NimBLEDevice::deinit(true);
+    
+    // 4. Kích hoạt RTC GPIO Wakeup trên cả 3 chân cứng (Active LOW)
+    uint64_t wakeMask = (1ULL << R503_WAKE_PIN) | (1ULL << SW420_VIBRATE_PIN) | (1ULL << RF_LOCATE_PIN);
+    esp_deep_sleep_enable_gpio_wakeup(wakeMask, ESP_GPIO_WAKEUP_GPIO_LOW);
+    
+    Serial.printf("🔒 [POWER] Đã thiết lập ngắt RTC Wakeup trên:\n");
+    Serial.printf("   - GPIO %d: Chạm vân tay R503 (Active LOW)\n", R503_WAKE_PIN);
+    Serial.printf("   - GPIO %d: Cảm biến rung SW-420 (Active LOW)\n", SW420_VIBRATE_PIN);
+    Serial.printf("   - GPIO %d: Remote RF 433MHz qua Transistor đảo (Active LOW)\n", RF_LOCATE_PIN);
+    Serial.println("💤 [POWER] ESP32-C3 bắt đầu ngủ sâu (Dòng ăn bình ~1.2mA). Tạm biệt!");
+    Serial.flush();
+    
+    esp_deep_sleep_start();
 }
 
 // ==========================================
@@ -1721,6 +1839,7 @@ void processIncomingCommand(String data) {
     if (data == lastCommand && millis() - lastCmdTime < 300) return;
     lastCommand = data;
     lastCmdTime = millis();
+    lastActivityTime = millis();
 
     Serial.println("BLE Received: " + data);
 
@@ -1787,6 +1906,12 @@ void processIncomingCommand(String data) {
         NimBLEDevice::deleteAllBonds();
         notifyStatus("UNPAIR_ALL_OK");
         beep(3, 80);
+    }
+    else if (cmd == "SLEEP_NOW" || cmd == "DEEP_SLEEP") {
+        Serial.println("💤 Nhận lệnh vào TẦNG 2 DEEP SLEEP từ ứng dụng BLE!");
+        notifyStatus("DANG_VAO_DEEP_SLEEP");
+        delay(300);
+        enterTier2DeepSleep();
     }
 
     // --- CÁC LỆNH QUẢN LÝ VÂN TAY ---
@@ -2009,6 +2134,7 @@ void processIncomingCommand(String data) {
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer *pServer) override {
         deviceConnected = true;
+        lastActivityTime = millis();
         Serial.println("BLE Client đã kết nối!");
         setR503Led(FINGERPRINT_LED_FLASHING, FINGERPRINT_LED_BLUE, 50, 1);
         pendingIdleLedUntil = millis() + 400; // Sau 1 nháy kết nối BLE, tự khôi phục màu đèn trạng thái xe
@@ -2052,6 +2178,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 
     void onDisconnect(NimBLEServer *pServer) override {
         deviceConnected = false;
+        lastActivityTime = millis();
         Serial.println("BLE Client đã ngắt kết nối.");
 
         // Hủy chu trình thêm vân tay nếu đang chạy dở khi mất kết nối BLE
@@ -2083,7 +2210,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         }
 
         Serial.println("Bắt đầu Advertising lại...");
-        NimBLEDevice::startAdvertising();
+        updateBleAdvertisingMode(isUnlocked);
     }
 };
 
@@ -2107,17 +2234,44 @@ void setup() {
     Serial.println("   TSMARTKEY ESP32-C3 SYSTEM   ");
     Serial.println("==============================");
 
-    // 1. Khởi tạo Relay Pins & Chân RF
+    lastActivityTime = millis();
+
+    // 0. Kiểm tra nguyên nhân khởi động / thức dậy từ Deep Sleep
+    esp_sleep_wakeup_cause_t wakeupCause = esp_sleep_get_wakeup_cause();
+    if (wakeupCause == ESP_SLEEP_WAKEUP_GPIO) {
+        uint64_t wakeupPins = esp_sleep_get_gpio_wakeup_status();
+        Serial.printf("⚡ [WAKEUP] Thức dậy từ DEEP SLEEP qua RTC GPIO! Mask: 0x%llX\n", wakeupPins);
+        if (wakeupPins & (1ULL << R503_WAKE_PIN)) {
+            Serial.printf("👉 [WAKEUP] Kích hoạt bởi: Chạm vân tay R503 (GPIO %d)!\n", R503_WAKE_PIN);
+            wakeTriggeredByFingerprint = true;
+        }
+        if (wakeupPins & (1ULL << SW420_VIBRATE_PIN)) {
+            Serial.printf("👉 [WAKEUP] Kích hoạt bởi: Cảm biến rung SW-420 (GPIO %d)!\n", SW420_VIBRATE_PIN);
+            wakeTriggeredByVibration = true;
+        }
+        if (wakeupPins & (1ULL << RF_LOCATE_PIN)) {
+            Serial.printf("👉 [WAKEUP] Kích hoạt bởi: Remote RF 433MHz (GPIO %d)!\n", RF_LOCATE_PIN);
+            wakeTriggeredByRf = true;
+        }
+    } else {
+        Serial.println("🔌 [BOOT] Khởi động hệ thống bình thường (Power-on / Reset).");
+    }
+
+    // 1. Khởi tạo Relay Pins & Chân Ngoại vi
     pinMode(RELAY1_PIN, OUTPUT);
     pinMode(RELAY2_PIN, OUTPUT);
     pinMode(RELAY3_PIN, OUTPUT);
+    pinMode(ONBOARD_LED_PIN, OUTPUT);
+    digitalWrite(ONBOARD_LED_PIN, HIGH); // Active LOW: Tắt LED xanh Onboard
 
-    // Cấu hình chân tín hiệu Module RF 433MHz (Chỉ tìm xe, không mở khóa)
-    pinMode(RF_LOCATE_PIN, INPUT_PULLDOWN);
+    // Cấu hình chân tín hiệu Module RF 433MHz (Active LOW qua transistor đảo)
+    pinMode(RF_LOCATE_PIN, INPUT_PULLUP);
+
+    // Cấu hình cảm biến rung SW-420 (Active LOW khi rung)
+    pinMode(SW420_VIBRATE_PIN, INPUT_PULLUP);
 
     // Cấu hình chân cảm ứng ngắt WAKEUP của R503 (Active LOW: Không chạm = 3.2V, Chạm = 0V)
     pinMode(R503_WAKE_PIN, INPUT_PULLUP);
-    pinMode(2, INPUT_PULLUP); // Dự phòng cho trường hợp cắm vào chân GPIO 2
 
     // 2. Tải cấu hình từ Flash NVS
     prefsSecurity.begin("safe_key", false);
@@ -2236,12 +2390,40 @@ void setup() {
     NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(SERVICE_UUID);
     pAdvertising->setScanResponse(true);
+    if (!isUnlocked) {
+        // Tầng 1 Power Saving: 1280ms (2048 * 0.625ms = 1280ms)
+        pAdvertising->setMinInterval(2048);
+        pAdvertising->setMaxInterval(2048);
+        isPowerSavingAdvertising = true;
+        Serial.println("🍃 BLE Advertising ban đầu: TẦNG 1 POWER SAVING (1280ms / 1.28s)");
+    } else {
+        // Fast mode: 100ms - 200ms
+        pAdvertising->setMinInterval(160);
+        pAdvertising->setMaxInterval(320);
+        isPowerSavingAdvertising = false;
+        Serial.println("⚡ BLE Advertising ban đầu: FAST (100ms - 200ms)");
+    }
     pAdvertising->start();
 
     Serial.println("✅ BLE Advertising đã bắt đầu! Đang chờ kết nối...");
 
     // Hiển thị Menu điều khiển Console tương tác trực tiếp qua Serial Monitor
     printMenu();
+
+    // 5. XỬ LÝ HÀNH ĐỘNG TỨC THỜI NẾU VỪA THỨC DẬY TỪ DEEP SLEEP
+    if (wakeTriggeredByFingerprint) {
+        wakeTriggeredByFingerprint = false;
+        Serial.println("⚡ [WAKEUP ACTION] Chạm ngón tay đánh thức ESP32! Xác thực vân tay mở xe...");
+        handleFingerprintTouch();
+    } else if (wakeTriggeredByVibration) {
+        wakeTriggeredByVibration = false;
+        Serial.println("⚡ [WAKEUP ACTION] Xe bị rung động khi đỗ! Kích hoạt cảnh báo chống trộm...");
+        handleVibrationDetected();
+    } else if (wakeTriggeredByRf) {
+        wakeTriggeredByRf = false;
+        Serial.println("⚡ [WAKEUP ACTION] Bấm remote RF đánh thức ESP32! Phát tín hiệu tìm xe...");
+        triggerLocate();
+    }
 }
 
 void loop() {
@@ -2284,21 +2466,45 @@ void loop() {
 
     // Kiểm tra chạm ngón tay (Active LOW: Chạm = 0V / LOW trên chân WAKE)
     static unsigned long lastTouchTrigger = 0;
-    bool wakeTriggered = (digitalRead(R503_WAKE_PIN) == LOW) || (digitalRead(2) == LOW);
+    bool wakeTriggered = (digitalRead(R503_WAKE_PIN) == LOW);
     if (r503Ready && !isCapturingImage && !isEnrolling && wakeTriggered && (millis() - lastTouchTrigger > 800)) {
         lastTouchTrigger = millis();
+        lastActivityTime = millis();
         handleFingerprintTouch();
+    }
+
+    // -------------------------------------------------------------
+    // 🚨 KIỂM TRA CẢM BIẾN RUNG SW-420 (BÁO ĐỘNG KHI XE KHÓA)
+    // -------------------------------------------------------------
+    static unsigned long lastVibrateTime = 0;
+    if (!isUnlocked && (digitalRead(SW420_VIBRATE_PIN) == LOW)) {
+        if (millis() - lastVibrateTime > 1500) { // Cooldown chống dội 1.5s
+            lastVibrateTime = millis();
+            lastActivityTime = millis();
+            handleVibrationDetected();
+        }
     }
 
     // -------------------------------------------------------------
     // 📻 KIỂM TRA TÍN HIỆU TỪ REMOTE RF 433MHz (CHỈ TÌM XE - KHÔNG MỞ KHÓA)
     // -------------------------------------------------------------
     static unsigned long lastRfTime = 0;
-    if (digitalRead(RF_LOCATE_PIN) == HIGH) {
+    if (digitalRead(RF_LOCATE_PIN) == LOW) {
         if (millis() - lastRfTime > 1500) { // Cooldown chống dội 1.5s
             lastRfTime = millis();
+            lastActivityTime = millis();
             Serial.println("📻 Tín hiệu RF Remote: Yêu cầu Tìm xe (Locate Only - An toàn tuyệt đối)!");
             triggerLocate();
+        }
+    }
+
+    // -------------------------------------------------------------
+    // 💤 KIỂM TRA TỰ ĐỘNG CHUYỂN TỪ TẦNG 1 SANG TẦNG 2 (DEEP SLEEP)
+    // -------------------------------------------------------------
+    if (!isUnlocked && !deviceConnected && !isEnrolling && !isCapturingImage) {
+        if (millis() - lastActivityTime >= DEEP_SLEEP_TIMEOUT_MS) {
+            Serial.println("⏳ [POWER] Đã quá 24h không có hoạt động chạm/kết nối! Tự động chuyển sang TẦNG 2: DEEP SLEEP...");
+            enterTier2DeepSleep();
         }
     }
 
@@ -2307,7 +2513,7 @@ void loop() {
     // -------------------------------------------------------------
     if (Serial.available()) {
         char firstCh = Serial.peek();
-        if (firstCh >= '1' && firstCh <= '8') {
+        if (firstCh >= '1' && firstCh <= '9') {
             char ch = Serial.read();
             delay(10);
             while (Serial.available() && (Serial.peek() == '\r' || Serial.peek() == '\n' || Serial.peek() == ' ')) {
@@ -2392,6 +2598,10 @@ void loop() {
                             Serial.println("❌ Đã hủy thao tác xóa hoặc hết thời gian chờ.");
                         }
                     }
+                    break;
+                case '9':
+                    Serial.println("\n💤 Thử nghiệm: Kích hoạt ngay TẦNG 2: DEEP SLEEP...");
+                    enterTier2DeepSleep();
                     break;
                 default:
                     break;

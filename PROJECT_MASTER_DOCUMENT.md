@@ -73,18 +73,22 @@ graph TD
 
 ## 2. SƠ ĐỒ PHẦN CỨNG ESP32-C3 & ĐẤU NỐI RELAY, CẢM BIẾN R503
 
-### 2.1 Bảng quy hoạch chân GPIO trên ESP32-C3 (SuperMini)
-| Chân ESP32-C3 | Chức năng | Đấu nối ngoại vi | Ghi chú |
-| :---: | :--- | :--- | :--- |
-| **`GPIO 4`** | Output | **Relay 1 (Khóa điện ACC)** | Đấu song song với 2 dây ổ khóa cơ xe máy |
-| **`GPIO 5`** | Output | **Relay 2 (Đề nổ)** | Kích nút đề xe (dùng khi bấm trên App / Watch) |
-| **`GPIO 6`** | Output | **Relay 3 (Còi / Đèn)** | Phát tín hiệu bíp và tìm xe trong bãi |
-| **`GPIO 7`** | Input | **Module RF 433MHz (Chân D0/VT)** | **Chỉ dùng Tìm xe** (3 nhịp bíp & nháy đèn, tuyệt đối không mở khóa) |
-| **`GPIO 0`** | UART1 RX | **R503 TXD (Dây Vàng)** | Nhận dữ liệu gói tin từ cảm biến R503 |
-| **`GPIO 1`** | UART1 TX | **R503 RXD (Dây Xanh lá)** | Truyền dữ liệu lệnh đến cảm biến R503 |
-| **`GPIO 3`** | Input | **R503 WAKEUP (Dây Xanh dương)** | Chân ngắt ngoài khi có ngón tay chạm cảm biến (Active LOW) |
-| **`3.3V`** | Nguồn | **R503 VCC (Dây Đỏ) & Touch Power (Dây Trắng)** | Cấp nguồn DC 3.3V ổn định |
-| **`GND`** | Nối đất | **R503 GND (Dây Đen)** | Mass chung của hệ thống |
+### 2.1 Bảng quy hoạch chân GPIO trên ESP32-C3 SuperMini (Golden Pinout - Chống xung đột Boot & Ngắt RTC)
+| Chân ESP32-C3 | Nhóm chân | Chức năng | Đấu nối ngoại vi | Ghi chú kỹ thuật |
+| :---: | :---: | :--- | :--- | :--- |
+| **`GPIO 6`** | Digital Out | Output | **Relay 1 (Khóa điện ACC)** | Đấu song song ổ khóa cơ xe máy (Chân sạch, không giật xung lúc boot) |
+| **`GPIO 7`** | Digital Out | Output | **Relay 2 (Đề nổ)** | Kích nút đề xe qua App / Watch (Chống tự đề lúc cắm bình) |
+| **`GPIO 10`** | Digital Out | Output | **Relay 3 (Còi / Xi-nhan)** | Phát tín hiệu bíp tìm xe & cảnh báo chống trộm |
+| **`GPIO 2`** | **RTC GPIO** | Input (Pullup) | **R503 WAKEUP (Dây Xanh dương)** | Đánh thức Deep Sleep (Active LOW: chạm = 0V, thức dậy trong 15ms) |
+| **`GPIO 3`** | **RTC GPIO** | Input (Pullup) | **Cảm biến rung SW-420 (DO)** | Đánh thức Deep Sleep & Kích hoạt báo động chống trộm dắt xe (Active LOW) |
+| **`GPIO 4`** | **RTC GPIO** | Input (Pullup) | **Module RF 433MHz (Chân VT)** | Đánh thức Deep Sleep qua Transistor NPN đảo mức (Active LOW khi bấm remote) |
+| **`GPIO 0`** | RTC / UART | UART1 RX | **R503 TXD (Dây Vàng)** | Nhận dữ liệu hình ảnh & gói tin từ cảm biến R503 |
+| **`GPIO 1`** | RTC / UART | UART1 TX | **R503 RXD (Dây Xanh lá)** | Truyền lệnh điều khiển đèn Aura & xác thực tới R503 |
+| **`GPIO 8`** | Strapping | Output | **LED Onboard Super Mini** | Đèn LED trạng thái trên bo mạch (Active LOW). **Không nối dây ngoài** để tránh lỗi boot |
+| **`GPIO 9`** | Strapping | - | **Nút BOOT Onboard** | **Để trống (NC)**. Đảm bảo nạp code và khởi động 100% không bị kẹt Download Mode |
+| **`GPIO 5`** | RTC / ADC1 | Analog In | *(Dự phòng ADC đo bình 12V)* | Cầu phân áp 100k/20k đo dung lượng bình ắc quy |
+| **`3.3V`** | Nguồn | DC 3.3V | **R503 VCC & Touch Power** | Cấp nguồn DC 3.3V ổn định từ Buck |
+| **`GND`** | Nối đất | Mass chung | **R503 GND, SW-420, RF** | Mass chung của toàn bộ hệ thống |
 
 ### 2.2 Sơ đồ cáp 6 dây của cảm biến vân tay R503
 ```text
@@ -93,7 +97,7 @@ Cáp R503 MX1.0mm:
 2. ĐEN       : GND
 3. VÀNG      : TXD  ---> Nối vào GPIO 0 (ESP32-C3 RX1)
 4. XANH LÁ   : RXD  ---> Nối vào GPIO 1 (ESP32-C3 TX1)
-5. XANH DƯƠNG: WAKEUP -> Nối vào GPIO 3 (ESP32-C3 ngắt chạm, Active LOW: chạm = 0V, nghỉ = 3.2V)
+5. XANH DƯƠNG: WAKEUP -> Nối vào GPIO 2 (ESP32-C3 RTC ngắt chạm, Active LOW: chạm = 0V, nghỉ = 3.2V)
 6. TRẮNG     : 3.3V Touch -> Nối vào 3.3V
 ```
 
