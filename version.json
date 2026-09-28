@@ -2,20 +2,25 @@
   "app": {
     "versionCode": 2,
     "versionName": "1.0.1",
-    "apkUrl": "",
+    "apkUrl": "https://alert.nas152.duckdns.org/downloads/app-debug.apk",
+    "apkName": "app-debug.apk",
     "changelog": ""
   },
   "firmware": {
     "versionCode": 2,
     "versionName": "1.0.1",
-    "binUrl": "",
-    "oledBinUrl": "",
+    "binUrl": "https://alert.nas152.duckdns.org/downloads/firmware.bin",
+    "binName": "firmware.bin",
+    "secondaryBinUrl": "",
+    "secondaryBinName": "",
+    "oledBinUrl": "https://alert.nas152.duckdns.org/downloads/firmware.bin",
     "changelog": ""
   },
   "firmware_oled": {
     "versionCode": 2,
     "versionName": "1.0.1",
-    "binUrl": "",
+    "binUrl": "https://alert.nas152.duckdns.org/downloads/firmware.bin",
+    "binName": "firmware_oled.bin",
     "changelog": ""
   }
 }
