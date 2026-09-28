@@ -132,6 +132,28 @@ class MainActivity : AppCompatActivity() {
     private var tvFpSensorStatus: TextView? = null
     private var rainCountDownTimer: android.os.CountDownTimer? = null
 
+    // Quản lý Báo Động Chống Dắt (Anti-Theft SW-420)
+    private var isAntiTheftActive = false
+    private var tvAntiTheftStatusRef: TextView? = null
+    private var tvAntiTheftBadgeRef: TextView? = null
+
+    private fun updateAntiTheftUI(active: Boolean) {
+        runOnUiThread {
+            isAntiTheftActive = active
+            if (active) {
+                tvAntiTheftStatusRef?.text = "Đang kích hoạt • Giám sát rung"
+                tvAntiTheftStatusRef?.setTextColor(ContextCompat.getColor(this, R.color.secondary_teal))
+                tvAntiTheftBadgeRef?.text = "BẢO VỆ"
+                tvAntiTheftBadgeRef?.setTextColor(ContextCompat.getColor(this, R.color.secondary_teal))
+            } else {
+                tvAntiTheftStatusRef?.text = "Đang tắt (Chạm để bật)"
+                tvAntiTheftStatusRef?.setTextColor(ContextCompat.getColor(this, R.color.text_muted))
+                tvAntiTheftBadgeRef?.text = "TẮT"
+                tvAntiTheftBadgeRef?.setTextColor(ContextCompat.getColor(this, R.color.text_secondary))
+            }
+        }
+    }
+
     // Quản lý Tinh chỉnh Cảm biến Vân tay (Fingerprint Fine-Tuning)
     private var fpSettingsDialog: AlertDialog? = null
     private var fpSecLevelVal = 2
@@ -182,6 +204,25 @@ class MainActivity : AppCompatActivity() {
     private var btnTabSuccessRef: Button? = null
     private var btnTabErrorRef: Button? = null
 
+    // Nâng cấp Firmware OTA qua BLE
+    private var selectedOtaFileUri: android.net.Uri? = null
+    private var btnStartOtaRef: AppCompatButton? = null
+    private var tvFileInfoRef: TextView? = null
+    private var tvFileMd5Ref: TextView? = null
+    private var layoutOtaProgressRef: View? = null
+    private var progressBarOtaRef: ProgressBar? = null
+    private var tvOtaPercentRef: TextView? = null
+    private var tvOtaStatusRef: TextView? = null
+    private var tvOtaSpeedRef: TextView? = null
+
+    private val selectFirmwareLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? ->
+        if (uri != null) {
+            selectedOtaFileUri = uri
+            onOtaFileSelected(uri)
+        }
+    }
 
     // Quản lý tự động kết nối lại khi xe lại gần
     private var isManualDisconnect = false
@@ -337,23 +378,18 @@ class MainActivity : AppCompatActivity() {
 
         // Card Chống dắt (Anti-theft)
         val btnAntiTheftCard = findViewById<View>(R.id.btnAntiTheftCard)
-        val tvAntiTheftStatus = findViewById<TextView>(R.id.tvAntiTheftStatus)
-        val tvAntiTheftBadge = findViewById<TextView>(R.id.tvAntiTheftBadge)
-        var isAntiTheftActive = false
+        tvAntiTheftStatusRef = findViewById(R.id.tvAntiTheftStatus)
+        tvAntiTheftBadgeRef = findViewById(R.id.tvAntiTheftBadge)
+        updateAntiTheftUI(false)
 
         btnAntiTheftCard?.setOnClickListener {
-            isAntiTheftActive = !isAntiTheftActive
-            if (isAntiTheftActive) {
-                tvAntiTheftStatus?.text = "Đang kích hoạt • Giám sát rung"
-                tvAntiTheftStatus?.setTextColor(ContextCompat.getColor(this, R.color.secondary_teal))
-                tvAntiTheftBadge?.text = "BẢO VỆ"
-                tvAntiTheftBadge?.setTextColor(ContextCompat.getColor(this, R.color.secondary_teal))
-            } else {
-                tvAntiTheftStatus?.text = "Đang tắt (Chạm để bật)"
-                tvAntiTheftStatus?.setTextColor(ContextCompat.getColor(this, R.color.text_muted))
-                tvAntiTheftBadge?.text = "TẮT"
-                tvAntiTheftBadge?.setTextColor(ContextCompat.getColor(this, R.color.text_secondary))
+            if (!isConnectedToVehicle()) {
+                Toast.makeText(this, "Vui lòng kết nối xe trước khi bật/tắt chống dắt!", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
             }
+            val targetState = !isAntiTheftActive
+            sendVehicleCommand("SET_ALARM|" + (if (targetState) "1" else "0"))
+            triggerHapticFeedback()
         }
 
         // Các nút trong tab vân tay & cài đặt mới
@@ -514,6 +550,11 @@ class MainActivity : AppCompatActivity() {
 
         btnViewHistory.setOnClickListener {
             showUnlockHistoryDialog()
+        }
+
+        val btnOtaUpdate = findViewById<Button?>(R.id.btnOtaUpdate)
+        btnOtaUpdate?.setOnClickListener {
+            showOtaUpdateDialog()
         }
 
         findViewById<View>(R.id.header).visibility = if (isShowInfoEnabled) View.VISIBLE else View.GONE
@@ -836,6 +877,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleVehicleFeedback(status: String) {
+        if (status.startsWith("OTA_")) {
+            OtaManager.handleBleFeedback(status)
+            return
+        }
+
         // 1. Nhận chunk ảnh: hỗ trợ cả định dạng mới có index (FP_IMG_CHUNK|<seq>|<total>|<b64>) và định dạng cũ
         if (status.startsWith("FP_IMG_CHUNK|")) {
             val payload = status.substringAfter("FP_IMG_CHUNK|").trim()
@@ -1313,6 +1359,21 @@ class MainActivity : AppCompatActivity() {
                 }
                 status == "UNPAIR_ALL_OK" -> {
                     Toast.makeText(this, "🛡️ Đã xóa sạch toàn bộ thiết bị ghép đôi trên xe thành công!", Toast.LENGTH_LONG).show()
+                    triggerHapticFeedback()
+                }
+                status.startsWith("ALARM_STATUS|") -> {
+                    val st = status.substringAfter("ALARM_STATUS|").trim()
+                    updateAntiTheftUI(st == "1")
+                }
+                status == "CANH_BAO_RUNG" -> {
+                    tvFpSensorStatus?.text = "🚨 CẢNH BÁO: Phát hiện rung lắc xe!"
+                    tvFpSensorStatus?.setTextColor(getColor(R.color.accent_danger))
+                    UnlockHistoryManager.addEvent(
+                        this,
+                        "Cảnh báo rung lắc (Chống trộm)",
+                        UnlockHistoryManager.TYPE_ALARM,
+                        "Cảm biến rung SW-420 kích hoạt"
+                    )
                     triggerHapticFeedback()
                 }
 
@@ -2771,6 +2832,10 @@ class MainActivity : AppCompatActivity() {
                             ivIcon.setImageResource(R.drawable.ic_auto)
                             ivIcon.imageTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.secondary_teal))
                         }
+                        UnlockHistoryManager.TYPE_ALARM -> {
+                            ivIcon.setImageResource(R.drawable.ic_auto)
+                            ivIcon.imageTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.primary_red))
+                        }
                         else -> {
                             ivIcon.setImageResource(R.drawable.ic_power)
                             ivIcon.imageTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.text_secondary))
@@ -3012,6 +3077,7 @@ class MainActivity : AppCompatActivity() {
             tvFpSensorStatus?.text = "Cảm biến R503: Sẵn sàng hoạt động"
             tvFpSensorStatus?.setTextColor(getColor(R.color.secondary_teal))
             requestFingerprintList()
+            sendVehicleCommand("GET_ALARM")
             handler.removeCallbacks(rssiPollRunnable)
             handler.post(rssiPollRunnable)
         } else {
@@ -3118,6 +3184,154 @@ class MainActivity : AppCompatActivity() {
             action()
         }
     }
+
+    private fun onOtaFileSelected(uri: android.net.Uri) {
+        try {
+            var fileName = "firmware.bin"
+            var fileSize = 0L
+            val cursor = contentResolver.query(uri, null, null, null, null)
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val nameIdx = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    val sizeIdx = it.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                    if (nameIdx != -1) fileName = it.getString(nameIdx)
+                    if (sizeIdx != -1) fileSize = it.getLong(sizeIdx)
+                }
+            }
+            if (fileSize == 0L) {
+                val pfd = contentResolver.openFileDescriptor(uri, "r")
+                fileSize = pfd?.statSize ?: 0L
+                pfd?.close()
+            }
+
+            val sizeKb = fileSize / 1024
+            tvFileInfoRef?.text = "File: $fileName ($sizeKb KB)"
+            tvFileInfoRef?.setTextColor(ContextCompat.getColor(this, R.color.gold_bright))
+            btnStartOtaRef?.isEnabled = true
+        } catch (e: Exception) {
+            Toast.makeText(this, "Lỗi đọc thông tin file: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun showOtaUpdateDialog() {
+        if (!isConnectedToVehicle()) {
+            Toast.makeText(this, "Vui lòng kết nối Bluetooth với xe trước!", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_ota_update, null)
+        val dialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .setCancelable(false)
+            .create()
+
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+
+        val btnSelectFile = dialogView.findViewById<AppCompatButton>(R.id.btnSelectFile)
+        val tvFileInfo = dialogView.findViewById<TextView>(R.id.tvFileInfo)
+        val tvFileMd5 = dialogView.findViewById<TextView>(R.id.tvFileMd5)
+        val btnStartOta = dialogView.findViewById<AppCompatButton>(R.id.btnStartOta)
+        val btnCancelOta = dialogView.findViewById<AppCompatButton>(R.id.btnCancelOta)
+        val layoutProgress = dialogView.findViewById<View>(R.id.layoutOtaProgress)
+        val progressBar = dialogView.findViewById<ProgressBar>(R.id.progressBarOta)
+        val tvPercent = dialogView.findViewById<TextView>(R.id.tvOtaPercent)
+        val tvStatus = dialogView.findViewById<TextView>(R.id.tvOtaStatus)
+        val tvSpeed = dialogView.findViewById<TextView>(R.id.tvOtaSpeed)
+
+        tvFileInfoRef = tvFileInfo
+        tvFileMd5Ref = tvFileMd5
+        btnStartOtaRef = btnStartOta
+        layoutOtaProgressRef = layoutProgress
+        progressBarOtaRef = progressBar
+        tvOtaPercentRef = tvPercent
+        tvOtaStatusRef = tvStatus
+        tvOtaSpeedRef = tvSpeed
+
+        // Khôi phục file đã chọn trước đó (nếu có)
+        if (selectedOtaFileUri != null) {
+            onOtaFileSelected(selectedOtaFileUri!!)
+        }
+
+        btnSelectFile.setOnClickListener {
+            if (OtaManager.isUpdating) return@setOnClickListener
+            selectFirmwareLauncher.launch("*/*")
+        }
+
+        btnStartOta.setOnClickListener {
+            val uri = selectedOtaFileUri
+            if (uri == null) {
+                Toast.makeText(this, "Vui lòng chọn file firmware trước!", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            if (isOn) {
+                Toast.makeText(this, "⚠️ Xe đang mở khóa ACC! Vui lòng tắt khóa điện trước khi cập nhật.", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+
+            btnSelectFile.isEnabled = false
+            btnStartOta.isEnabled = false
+            btnCancelOta.text = "Hủy cập nhật"
+            layoutProgress.visibility = View.VISIBLE
+            progressBar.progress = 0
+            tvPercent.text = "0%"
+            tvStatus.text = "Đang chuẩn bị gói dữ liệu..."
+
+            OtaManager.onProgress = { percent, bytesSent, totalBytes, speedKbps ->
+                runOnUiThread {
+                    progressBar.progress = percent
+                    tvPercent.text = "$percent%"
+                    val sentKb = bytesSent / 1024
+                    val totalKb = totalBytes / 1024
+                    tvSpeed.text = String.format(Locale.US, "%d KB / %d KB (%.1f KB/s)", sentKb, totalKb, speedKbps)
+                }
+            }
+
+            OtaManager.onStatusChange = { msg ->
+                runOnUiThread {
+                    tvStatus.text = msg
+                }
+            }
+
+            OtaManager.onCompleted = { success, msg ->
+                runOnUiThread {
+                    btnSelectFile.isEnabled = true
+                    btnCancelOta.text = "Đóng"
+                    btnStartOta.isEnabled = true
+                    tvStatus.text = msg
+                    if (success) {
+                        tvPercent.text = "100%"
+                        progressBar.progress = 100
+                        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                        triggerHapticFeedback()
+                    } else {
+                        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+
+            OtaManager.startOta(this, uri)
+        }
+
+        btnCancelOta.setOnClickListener {
+            if (OtaManager.isUpdating) {
+                AlertDialog.Builder(this)
+                    .setTitle("Hủy Cập Nhật OTA?")
+                    .setMessage("Tiến trình nạp firmware đang diễn ra. Bạn có chắc muốn dừng lại không?")
+                    .setPositiveButton("Dừng Lại") { _, _ ->
+                        OtaManager.abortOta()
+                        dialog.dismiss()
+                    }
+                    .setNegativeButton("Tiếp Tục", null)
+                    .show()
+            } else {
+                dialog.dismiss()
+            }
+        }
+
+        dialog.show()
+    }
+
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)

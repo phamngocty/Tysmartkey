@@ -32,6 +32,7 @@ object UnlockHistoryManager {
     const val TYPE_ENGINE_START = "ENGINE_START"
     const val TYPE_LOCATE = "LOCATE"
     const val TYPE_WATCH_ACTION = "WATCH_ACTION"
+    const val TYPE_ALARM = "ALARM"
 
     fun addEvent(context: Context, title: String, type: String, detail: String = "") {
         val list = getHistory(context).toMutableList()

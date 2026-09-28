@@ -1,330 +1,630 @@
-# TSMARTKEY - BỘ TÀI LIỆU GỐC HỆ THỐNG (MASTER SYSTEM DOCUMENT)
+# TSMARTKEY - BỘ TÀI LIỆU TOÀN DIỆN HỆ THỐNG (SYSTEM MASTER ARCHITECTURE & SPECIFICATION)
 
-> **Dự án**: Hệ thống khóa xe thông minh điều khiển, mở khóa vân tay & tìm xe từ xa bằng App Điện thoại và Đồng hồ thông minh qua Bluetooth Low Energy (BLE) kết nối ESP32-C3.  
-> **Phiên bản tài liệu**: 1.2.0 (Tích hợp Module RF 433MHz Tìm xe & Cơ chế an toàn Fail-Safe chuẩn công nghiệp)  
-> **Cập nhật lần cuối**: 2026-09-13  
-
----
-
-## MỤC LỤC
-1. [Tổng quan dự án & Luồng hoạt động](#1-tổng-quan-dự-án--luồng-hoạt-động)
-2. [Sơ đồ phần cứng ESP32-C3 & Đấu nối Relay, Cảm biến R503](#2-sơ-đồ-phần-cứng-esp32-c3--đấu-nối-relay-cảm-biến-r503)
-3. [Cấu trúc cây thư mục toàn bộ dự án](#3-cấu-trúc-cây-thư-mục-toàn-bộ-dự-án)
-4. [Kiến trúc giao thức truyền thông BLE & Phản hồi Feedback](#4-kiến-trúc-giao-thức-truyền-thông-ble--phản-hồi-feedback)
-5. [Đặc tả Firmware ESP32-C3 (`firmware/esp32 c3`)](#5-đặc-tả-firmware-esp32-c3-firmwareesp32-c3)
-6. [Đặc tả Ứng dụng Điện thoại Android (`:app`)](#6-đặc-tả-ứng-dụng-điện-thoại-android-app)
-7. [Đặc tả Ứng dụng Đồng hồ Wear OS (`:wear`)](#7-đặc-tả-ứng-dụng-đồng-hồ-wear-os-wear)
-8. [Hướng dẫn mở rộng & Phát triển tính năng mới](#8-hướng-dẫn-mở-rộng--phát-triển-tính-năng-mới)
-9. [Kiến trúc An toàn Fail-Safe & Cơ chế Xử lý sự cố thực tế](#9-kiến-trúc-an-toàn-fail-safe--cơ-chế-xử-lý-sự-cố-thực-tế)
+> **MỤC ĐÍCH TÀI LIỆU**: Đây là bản tài liệu tổng thể (Single Source of Truth) của toàn bộ dự án **Tsmartkey**. Bất kỳ Kỹ sư phần mềm, Kỹ sư nhúng, Kỹ sư di động hoặc Trợ lý AI (Claude, GPT, Gemini, DeepSeek,...) khi đọc tài liệu này đều có thể nắm bắt 100% kiến trúc phần cứng, firmware ESP32-C3, ứng dụng Android, Wear OS, giao thức BLE bảo mật, và toàn bộ luồng hoạt động mà không cần đọc rà soát lại mã nguồn từ đầu.  
+> **Phiên bản hệ thống**: 2.0.0 (Production-Ready Architecture)  
+> **Nền tảng**: ESP32-C3 RISC-V + NimBLE 5.0 + Adafruit R503 + Android Kotlin + Wear OS Jetpack Compose  
+> **Ngày cập nhật**: 2026-09-27  
 
 ---
 
-## 1. TỔNG QUAN DỰ ÁN & LUỒNG HOẠT ĐỘNG
+## LỜI NHẮC NGỮ CẢNH DÀNH CHO AI (CONTEXT PRIMING PROMPT)
+```text
+BẠN ĐANG LÀM VIỆC VỚI DỰ ÁN "TSMARTKEY":
+- Dự án là hệ thống Khóa Thông Minh (Smartkey) cho xe máy (tiêu chuẩn xe Honda SH / xe tay ga / xe số / xe điện).
+- Phần cứng trung tâm: ESP32-C3 SuperMini (MCU RISC-V 32-bit 160MHz, 4MB Flash, BLE 5.0).
+- Cảm biến sinh trắc học: Hangzhou Grow R503 / R503-M22 (UART 57600 baud, LED hào quang Aura RGB Opcode 0x35, chân ngắt WAKE chạm điện dung).
+- Ứng dụng điều khiển: Android App (Kotlin, BleManager GATT, OtaManager, UnlockHistoryManager) & Wear OS Smartwatch (Jetpack Compose, nhận diện búng tay đề máy).
+- Cơ chế an toàn sống còn: Fail-Safe chuẩn công nghiệp ô tô. Khi xe đang mở khóa chạy ngoài đường, mất kết nối Bluetooth BLE TUYỆT ĐỐI KHÔNG ĐƯỢC TẮT NGUỒN RELAY 1.
+- Tiếp điểm Relay 1 đấu song song 100% với ổ khóa cơ của xe máy để dự phòng phần cứng.
+Hãy tuân thủ nghiêm ngặt tất cả các bảng mã lệnh, Golden Pinout, Flash NVS schema, và quy chuẩn giao tiếp được đặc tả chi tiết dưới đây.
+```
 
-### 1.1 Mục đích hệ thống
-Tsmartkey là giải pháp Smartkey xe máy/xe điện thông minh toàn diện:
-- **Mở khóa / Khóa xe bằng Vân tay một chạm (GROW R503)**:
-  - Khi xe đang tắt: Chạm vân tay đúng $\rightarrow$ Mở khóa điện xe (Relay 1 ON), LED nháy xanh lá, bíp 1 tiếng. Bạn bấm nút đề trên xe để khởi động.
-  - Khi xe đang bật: Chạm vân tay đúng $\rightarrow$ Tắt khóa điện xe (Relay 1 OFF), LED nháy đỏ, bíp 2 tiếng.
-  - Quẹt sai: LED nháy đỏ cảnh báo, còi tít tít.
-- **Mở khóa xe / Tìm xe / Đề xe từ xa qua BLE**: Điều khiển trực tiếp từ App Android hoặc Đồng hồ thông minh Wear OS.
-- **Đấu nối an toàn (Song song ổ khóa cơ)**: Tiếp điểm Relay 1 đấu song song với ổ khóa cơ của xe máy. Khi cắm chìa khóa cơ vặn vẫn nổ máy bình thường (Fail-safe 100%).
-- **Lưu trữ Flash NVS**: Tên vân tay (`name_<id>`), mã bảo mật (`master_key`) và trạng thái xe (`is_unlocked`) được lưu vĩnh viễn trên ESP32-C3, khôi phục tức thời khi mất điện nguồn.
+---
 
-### 1.2 Mô hình kiến trúc hệ thống
+## MỤC LỤC CHI TIẾT
+1. [Tổng quan hệ sinh thái & Kiến trúc luồng hoạt động](#1-tổng-quan-hệ-sinh-thái--kiến-trúc-luồng-hoạt-động)
+2. [Sơ đồ phần cứng & Bảng Golden Pinout ESP32-C3](#2-sơ-đồ-phần-cứng--bảng-golden-pinout-esp32-c3)
+3. [Bộ nhớ Flash NVS & Bảng phân vùng Dual OTA (4MB Flash)](#3-bộ-nhớ-flash-nvs--bảng-phân-vùng-dual-ota-4mb-flash)
+4. [Giao thức truyền thông BLE & Bảo mật phần cứng AES-128 SMP](#4-giao-thức-truyền-thông-ble--bảo-mật-phần-cứng-aes-128-smp)
+5. [Đặc tả quy trình nạp Firmware từ xa BLE OTA (Over-The-Air)](#5-đặc-tả-quy-trình-nạp-firmware-từ-xa-ble-ota-over-the-air)
+6. [Đặc tả cảm biến vân tay R503 & Đèn vòng hào quang Aura RGB 360°](#6-đặc-tả-cảm-biến-vân-tay-r503--đèn-vòng-hào-quang-aura-rgb-360)
+7. [Chế độ chống nước mưa (Anti-Rain) & Tinh chỉnh cảm biến](#7-chế-độ-chống-nước-mưa-anti-rain--tinh-chỉnh-cảm-biến)
+8. [Quản lý nguồn 2 tầng (Tier 1 Power Saving & Tier 2 Deep Sleep)](#8-quản-lý-nguồn-2-tầng-tier-1-power-saving--tier-2-deep-sleep)
+9. [Đặc tả ứng dụng Android (`:app`) & Đồng hồ Wear OS (`:wear`)](#9-đặc-tả-ứng-dụng-android-app--đồng-hồ-wear-os-wear)
+10. [Kiến trúc an toàn Fail-Safe & Cơ chế cứu hộ sự cố thực tế](#10-kiến-trúc-an-toàn-fail-safe--cơ-chế-cứu-hộ-sự-cố-thực-tế)
+11. [Cấu trúc thư mục toàn dự án & Hướng dẫn Build / Flash](#11-cấu-trúc-thư-mục-toàn-dự-án--hướng-dẫn-build--flash)
+
+---
+
+## 1. TỔNG QUAN HỆ SINH THÁI & KIẾN TRÚC LUỒNG HOẠT ĐỘNG
+
+### 1.1 Mục đích và chức năng cốt lõi
+Tsmartkey mang đến trải nghiệm mở khóa không chìa (Keyless Go) hoàn chỉnh và bảo mật vượt trội cho xe máy:
+1. **Mở / Khóa xe bằng Cảm biến vân tay một chạm R503**:
+   - Khi xe đang tắt (`isUnlocked == false`): Chạm ngón tay đã đăng ký $\rightarrow$ Đóng Relay 1 (Cấp điện ACC xe), nháy LED Aura màu xanh, bíp 1 tiếng. Người lái chỉ việc bấm nút đề xe trên tay lái để khởi hành.
+   - Khi xe đang bật (`isUnlocked == true`): Chạm ngón tay hợp lệ $\rightarrow$ Ngắt Relay 1 (Tắt điện ACC), nháy LED Aura màu đỏ, bíp 2 tiếng.
+   - Quét sai: LED nháy đỏ cảnh báo, còi tít tít. Nếu quẹt sai 3 lần liên tiếp: Kích hoạt còi hú báo động chống trộm 6 tiếng.
+2. **Điều khiển từ xa qua Ứng dụng Di động Android**:
+   - Mở khóa / Khóa xe tức thời qua Bluetooth Low Energy (BLE 5.0).
+   - Kích đề nổ từ xa bằng nút ấn trên giao diện (Relay 2 đóng trong 1.5s).
+   - Tìm xe trong bãi đỗ / hầm xe qua còi và xi-nhan (Relay 3 kích hoạt 3.0s).
+   - Radar tìm xe 360° đo khoảng cách BLE RSSI theo thời gian thực (1.5m, 3.5m, 8.0m, 15m).
+   - Quản lý toàn diện vân tay: Thêm mới (hỗ trợ lấy mẫu 2 bước hoặc 4 bước góc rộng, truyền ảnh quang học), Đổi tên gợi nhớ, Xóa từng ngón, Xóa toàn bộ.
+   - Tùy biến bánh xe màu RGB cho đèn hào quang R503 theo 4 sự kiện.
+   - Bật/tắt và cấu hình chế độ chống nước mưa (Anti-Rain Mode).
+   - Nâng cấp firmware không dây BLE OTA trực tiếp từ file `.bin`.
+3. **Điều khiển rảnh tay từ Đồng hồ thông minh Wear OS**:
+   - Giao diện Jetpack Compose tròn tối ưu cho màn hình đồng hồ.
+   - Nút Hero mở/khóa xe và đề nổ máy.
+   - **Tính năng độc quyền: Búng tay đề xe (Pinch Gesture)** bằng thuật toán nhận diện gia tốc tuyến tính `Sensor.TYPE_LINEAR_ACCELERATION` (ngưỡng $> 18\text{ m/s}^2$).
+   - Đồng bộ thông suốt qua Google Wearable Data Layer tới dịch vụ chạy ngầm `WearMessageListenerService.kt` trên điện thoại.
+4. **Tìm xe qua Remote RF 433MHz**:
+   - Nhận tín hiệu từ tay bấm remote RF 433MHz để kích nháy xi-nhan và còi tìm xe.
+   - Chính sách an ninh: Module RF chỉ dùng tìm xe (Locate-Only), tuyệt đối không mở khóa để triệt tiêu nguy cơ sao chép sóng RF.
+5. **Dự phòng vật lý 100% (Hardware Fail-Safe Override)**:
+   - Tiếp điểm thường mở của Relay 1 đấu song song với 2 dây công tắc ổ khóa cơ zin của xe.
+   - Bất kể khi ESP32 hỏng hóc, chập nguồn hay hết ắc quy, người dùng chỉ cần cắm chìa khóa cơ vặn lên là xe có điện nổ máy bình thường.
+
+### 1.2 Sơ đồ khối kiến trúc hệ thống (System Architecture)
 
 ```mermaid
 graph TD
-    subgraph UserInteraction [Tương tác người dùng]
+    subgraph UserInterface [Tầng Tương Tác Người Dùng]
         FINGER[Ngón tay chạm R503]
-        WATCH[Smartwatch Wear OS: Cử chỉ búng tay / Chạm màn hình]
-        PHONE[Android App: Mở khóa, Đề, Tìm xe, Quản lý Vân tay]
+        WATCH[Smartwatch Wear OS: Chạm / Búng tay đề máy]
+        PHONE[Android App: Cockpit, Radar RSSI, Quản lý R503, OTA]
+        REMOTE[Remote RF 433MHz: Tìm xe]
+        KEY_MECH[Chìa khóa cơ zin của xe]
     end
 
-    subgraph PhoneBridge [Điện thoại Android :app]
-        BLE_MGR[BleManager: BLE GATT Client]
-        WEAR_SRV[WearMessageListenerService]
-        UI_MAIN[MainActivity & Tab Quản lý Vân tay]
+    subgraph PhoneBridgeModule [Android Device :app]
+        BLE_MGR[BleManager.kt: BLE GATT Client + AES-128 SMP]
+        WEAR_SRV[WearMessageListenerService.kt: Wearable Data Layer]
+        OTA_MGR[OtaManager.kt: BLE Dual Partition OTA Engine]
+        HIST_MGR[UnlockHistoryManager.kt: Bộ đệm 100 sự kiện]
+        UI_MAIN[MainActivity.kt: Cyber Luxury Gold Cockpit]
     end
 
-    subgraph BikeCore [Bộ điều khiển trung tâm trên xe]
-        ESP_C3[Vi điều khiển ESP32-C3 BLE Server]
-        R503[Cảm biến vân tay GROW R503]
-        NVS[Bộ nhớ Flash NVS Preferences]
-        R1[Relay 1: Đấu song song ổ khóa cơ ACC]
-        R2[Relay 2: Kích đề xe]
-        R3[Relay 3: Còi / Xi-nhan tìm xe]
+    subgraph BikeCoreNode [Bộ Điều Khiển Trung Tâm Xe - ESP32-C3]
+        MCU[Vi điều khiển ESP32-C3 SuperMini 160MHz]
+        NVS_STORAGE[(Flash NVS: safe_key, fingerprint, rain_cfg, led_cfg)]
+        R503_SENSOR[Cảm biến vân tay GROW R503 / R503-M22]
+        SW420_SENSOR[Cảm biến rung chống trộm SW-420]
+        RF_RECEIVER[Module thu RF 433MHz - Chân VT Active HIGH]
+        BATTERY_DIVIDER[Cầu phân áp ắc quy 1k - 10k]
+        RELAY1[Relay 1: Khóa điện ACC - Đấu song song ổ khóa cơ]
+        RELAY2[Relay 2: Kích nút đề Starter]
+        RELAY3[Relay 3: Còi hú / Đèn Xi-nhan]
     end
 
-    FINGER -->|Chạm ngón| R503
-    R503 <-->|UART 57600 + Wakeup| ESP_C3
-    WATCH <-->|Wearable Data Layer| WEAR_SRV
+    FINGER -->|Chạm ngón lăng kính| R503_SENSOR
+    R503_SENSOR <-->|UART1 57600bps + Chân WAKE GPIO 3| MCU
+    WATCH <-->|Google Play Services Wearable| WEAR_SRV
     WEAR_SRV --> BLE_MGR
-    UI_MAIN --> BLE_MGR
-    BLE_MGR <==>|Bluetooth Low Energy BLE 5.0| ESP_C3
+    UI_MAIN <--> BLE_MGR
+    OTA_MGR <--> BLE_MGR
+    HIST_MGR <--> UI_MAIN
 
-    ESP_C3 <--> NVS
-    ESP_C3 --> R1
-    ESP_C3 --> R2
-    ESP_C3 --> R3
+    BLE_MGR <==>|BLE 5.0 Encrypted MTU 517| MCU
+    BATTERY_DIVIDER -->|GPIO 2 ADC1_CH2 Tỷ lệ 1/11| MCU
+    REMOTE -->|Sóng RF 433MHz| RF_RECEIVER
+    RF_RECEIVER -->|GPIO 5 RTC Wakeup Active HIGH| MCU
+    SW420_SENSOR -->|GPIO 4 RTC Wakeup Active HIGH| MCU
+
+    MCU <--> NVS_STORAGE
+    MCU --> RELAY1
+    MCU --> RELAY2
+    MCU --> RELAY3
+
+    KEY_MECH -.->|Đấu song song tiếp điểm| RELAY1
 ```
 
 ---
 
-## 2. SƠ ĐỒ PHẦN CỨNG ESP32-C3 & ĐẤU NỐI RELAY, CẢM BIẾN R503
+## 2. SƠ ĐỒ PHẦN CỨNG & BẢNG GOLDEN PINOUT ESP32-C3
 
-### 2.1 Bảng quy hoạch chân GPIO trên ESP32-C3 SuperMini (Golden Pinout - Chống xung đột Boot & Ngắt RTC)
-| Chân ESP32-C3 | Nhóm chân | Chức năng | Đấu nối ngoại vi | Ghi chú kỹ thuật |
-| :---: | :---: | :--- | :--- | :--- |
-| **`GPIO 6`** | Digital Out | Output | **Relay 1 (Khóa điện ACC)** | Đấu song song ổ khóa cơ xe máy (Chân sạch, không giật xung lúc boot) |
-| **`GPIO 7`** | Digital Out | Output | **Relay 2 (Đề nổ)** | Kích nút đề xe qua App / Watch (Chống tự đề lúc cắm bình) |
-| **`GPIO 10`** | Digital Out | Output | **Relay 3 (Còi / Xi-nhan)** | Phát tín hiệu bíp tìm xe & cảnh báo chống trộm |
-| **`GPIO 2`** | **RTC GPIO** | Input (Pullup) | **R503 WAKEUP (Dây Xanh dương)** | Đánh thức Deep Sleep (Active LOW: chạm = 0V, thức dậy trong 15ms) |
-| **`GPIO 3`** | **RTC GPIO** | Input (Pullup) | **Cảm biến rung SW-420 (DO)** | Đánh thức Deep Sleep & Kích hoạt báo động chống trộm dắt xe (Active LOW) |
-| **`GPIO 4`** | **RTC GPIO** | Input (Pullup) | **Module RF 433MHz (Chân VT)** | Đánh thức Deep Sleep qua Transistor NPN đảo mức (Active LOW khi bấm remote) |
-| **`GPIO 0`** | RTC / UART | UART1 RX | **R503 TXD (Dây Vàng)** | Nhận dữ liệu hình ảnh & gói tin từ cảm biến R503 |
-| **`GPIO 1`** | RTC / UART | UART1 TX | **R503 RXD (Dây Xanh lá)** | Truyền lệnh điều khiển đèn Aura & xác thực tới R503 |
-| **`GPIO 8`** | Strapping | Output | **LED Onboard Super Mini** | Đèn LED trạng thái trên bo mạch (Active LOW). **Không nối dây ngoài** để tránh lỗi boot |
-| **`GPIO 9`** | Strapping | - | **Nút BOOT Onboard** | **Để trống (NC)**. Đảm bảo nạp code và khởi động 100% không bị kẹt Download Mode |
-| **`GPIO 5`** | RTC / ADC1 | Analog In | *(Dự phòng ADC đo bình 12V)* | Cầu phân áp 100k/20k đo dung lượng bình ắc quy |
-| **`3.3V`** | Nguồn | DC 3.3V | **R503 VCC & Touch Power** | Cấp nguồn DC 3.3V ổn định từ Buck |
-| **`GND`** | Nối đất | Mass chung | **R503 GND, SW-420, RF** | Mass chung của toàn bộ hệ thống |
+### 2.1 Bảng Golden Pinout chuẩn công nghiệp (Chống xung đột Boot & Ngắt RTC)
+Bo mạch sử dụng là **ESP32-C3 SuperMini**. Các chân GPIO được tính toán kỹ lưỡng nhằm tránh hoàn toàn các chân Strapping nhạy cảm lúc boot:
 
-### 2.2 Sơ đồ cáp 6 dây của cảm biến vân tay R503
+| Chân ESP32-C3 | Nhóm chức năng | Hướng I/O | Ngoại vi kết nối | Đặc tính kỹ thuật & Lý do lựa chọn |
+| :---: | :---: | :---: | :--- | :--- |
+| **`GPIO 6`** | General Digital | Output | **Relay 1 (Khóa điện ACC)** | Chân sạch 100%, không bị giật xung (glitch) lúc nạp bootloader. Tiếp điểm COM-NO đấu song song 2 dây ổ khóa cơ. |
+| **`GPIO 7`** | General Digital | Output | **Relay 2 (Kích đề Starter)** | Logic **Active LOW** (Kích hoạt đề = LOW/0V, Tắt = HIGH/3.3V). Kích nút đề xe trong 1.5 giây khi có lệnh hợp lệ. Mặc định kéo HIGH lúc khởi động chống giật relay và chống tự đề nổ máy. |
+| **`GPIO 10`** | General Digital | Output | **Relay 3 (Còi & Xi-nhan)** | Logic **Active LOW** (Kích hoạt còi/đèn = LOW/0V, Tắt = HIGH/3.3V). Kích hoạt còi và đèn chớp khi tìm xe hoặc báo động chống trộm. Chế độ Bật/Tắt xe thông thường hoàn toàn êm ái (Silent ACC). |
+| **`GPIO 3`** | **RTC GPIO** | Input (Pull-up) | **R503 WAKEUP (Dây Xanh dương)** | Chân cảm ứng điện dung R503. Logic **Active LOW** (Bình thường = 3.2V, ngón tay chạm lăng kính = 0V). Đánh thức MCU từ Deep Sleep trong 15ms. Sạch 100%, **không phải Strapping Pin**, triệt tiêu hoàn toàn lỗi kẹt ROM Bootloader. |
+| **`GPIO 4`** | **RTC GPIO** | Input (Pull-down) | **Cảm biến rung SW-420 (DO)** | Giám sát tác động rung lắc khi xe đang khóa (chỉ kích hoạt khi bật Chống dắt trên App/NVS). Logic **Active HIGH** (Bình thường = 0V, khi xe rung = 3.3V). Đánh thức MCU từ Deep Sleep qua ngắt RTC mức HIGH. |
+| **`GPIO 5`** | **RTC GPIO** | Input (Pull-down / Pull-up) | **Module RF 433MHz (Chân VT)** | Nhận trực tiếp tín hiệu từ chân VT (Valid Transmission) của module thu RF 433MHz. Logic **Active HIGH** (Bình thường = 0V, bấm remote = 3.3V). Đánh thức MCU từ Deep Sleep qua ngắt RTC mức HIGH (`ESP_GPIO_WAKEUP_GPIO_HIGH`). |
+| **`GPIO 0`** | RTC / UART1 | Input (RX1) | **R503 TXD (Dây Vàng)** | Chân nhận gói tin dữ liệu và ảnh quang học từ cảm biến R503. |
+| **`GPIO 1`** | RTC / UART1 | Output (TX1) | **R503 RXD (Dây Xanh lá)** | Chân phát lệnh điều khiển đèn Aura và xác thực tới cảm biến R503. |
+| **`GPIO 8`** | Strapping Pin | Output | **LED Xanh Onboard SuperMini** | Đèn LED trạng thái trên bo mạch. Logic **Active LOW**. Không kéo dây ra ngoài để bảo vệ mức logic lúc khởi động. |
+| **`GPIO 9`** | Strapping Pin | Input | **Nút BOOT Onboard** | Để trống (NC). Đảm bảo MCU luôn vào chế độ Run Mode bình thường, không kẹt Download Mode. |
+| **`GPIO 2`** | Strapping Pin / ADC1_CH2 | Input / ADC | **Đo điện áp bình ắc quy (Battery ADC)** | Mạch cầu phân áp $R_1=10\text{k}\Omega$ (nối $V_{BAT}$), $R_2=1\text{k}\Omega$ (nối GND). Tỷ lệ phân áp $1/11$ ($V_{ADC} = V_{BAT}/11$). An toàn cho ADC ESP32-C3 ($0 - 2.5\text{V}$ tương ứng $0 - 27.5\text{V}$ ắc quy). Lúc khởi động bình thường (Run Mode) GPIO 9=1 nên chân này không gây kẹt bootloader. |
+| **`3.3V`** | Nguồn | Power OUT | **VCC R503 & Touch Power** | Cấp nguồn 3.3VDC ổn định sau mạch Buck hạ áp. |
+| **`GND`** | Nối đất | Ground | **GND chung toàn hệ thống** | Đấu chung Mass của ESP32, Cảm biến R503, SW-420, RF và Relay. |
+
+### 2.2 Sơ đồ cáp 6 dây của cảm biến vân tay GROW R503 / R503-M22
+Cảm biến sử dụng đầu cắm chuẩn MX1.0mm 6-pin:
 ```text
-Cáp R503 MX1.0mm:
-1. ĐỎ        : VCC (3.3V)
-2. ĐEN       : GND
-3. VÀNG      : TXD  ---> Nối vào GPIO 0 (ESP32-C3 RX1)
-4. XANH LÁ   : RXD  ---> Nối vào GPIO 1 (ESP32-C3 TX1)
-5. XANH DƯƠNG: WAKEUP -> Nối vào GPIO 2 (ESP32-C3 RTC ngắt chạm, Active LOW: chạm = 0V, nghỉ = 3.2V)
-6. TRẮNG     : 3.3V Touch -> Nối vào 3.3V
+Cáp R503 (MX1.0mm 6-Pin):
+1. ĐỎ         : VCC 3.3V       ---> Cấp nguồn 3.3V ổn định
+2. ĐEN        : GND            ---> Mass chung (GND)
+3. VÀNG       : TXD (Sensor)   ---> Nối vào GPIO 0 (ESP32-C3 RX1)
+4. XANH LÁ    : RXD (Sensor)   ---> Nối vào GPIO 1 (ESP32-C3 TX1)
+5. XANH DƯƠNG : WAKEUP (Touch) ---> Nối vào GPIO 3 (Ngắt RTC Wakeup, Active LOW: Nghỉ=3.2V, Chạm=0V - Không kẹt Boot)
+6. TRẮNG      : 3.3V_TOUCH     ---> Nối vào nguồn 3.3V (Cấp điện cho mạch cảm ứng chạm điện dung)
 ```
 
-### 2.3 Đặc tả kỹ thuật khởi tạo UART & Thư viện Cảm biến R503 trên ESP32-C3
-```cpp
-// Khởi tạo UART1 cho cảm biến R503
-HardwareSerial r503Serial(1);
-Adafruit_Fingerprint finger = Adafruit_Fingerprint((Stream*)&r503Serial);
+### 2.3 Giải pháp kỹ thuật UART1 độc lập & Constructor Fix cho Adafruit Fingerprint
+- **Tách biệt hoàn toàn USB CDC và UART ngoại vi**:  
+  Nhờ cờ `-DARDUINO_USB_MODE=1` và `-DARDUINO_USB_CDC_ON_BOOT=1` trong `platformio.ini`, cổng nạp và Serial Monitor đi qua khối USB CDC nội bộ của ESP32-C3. Cổng UART1 phần cứng được giải phóng hoàn toàn cho GPIO 0 và GPIO 1 kết nối R503.
+- **Kỹ thuật ép kiểu `(Stream*)&r503Serial` (Constructor Collision Prevention)**:  
+  Thư viện `Adafruit_Fingerprint` có 2 constructor: `(HardwareSerial*)` và `(Stream*)`. Nếu truyền `&r503Serial` trực tiếp, thư viện sẽ vô tình gọi `hwSerial->begin(57600)` đè lên chân phần cứng và reset chân RX/TX về mặc định (`-1, -1`), gây đứt liên lạc UART.  
+  Ép kiểu sang `(Stream*)&r503Serial` buộc thư viện sử dụng Constructor dạng luồng trừu tượng, quyền cấu hình GPIO 0 và GPIO 1 thuộc toàn quyền của firmware:
+  ```cpp
+  HardwareSerial r503Serial(1);
+  Adafruit_Fingerprint finger = Adafruit_Fingerprint((Stream*)&r503Serial);
+  ```
+- **Vòng quét Baudrate tự phục hồi (Baudrate Auto-Scan Failsafe)**:  
+  Hệ thống hỗ trợ quét qua các tốc độ `{57600, 9600, 115200, 19200, 38400}`. Khi chuyển đổi tốc độ, firmware bắt buộc gọi `r503Serial.end(); delay(30);` để dọn sạch thanh ghi FIFO và ngắt UART, loại bỏ hoàn toàn nguy cơ treo chip.
+
+### 2.4 Sơ đồ nguyên lý mạch đo điện áp bình ắc quy (GPIO 2 - Cầu phân áp 1k - 10k)
+Chân **GPIO 2 (ADC1_CH2)** được kết nối với mạch cầu phân áp điện trở chính xác cao để theo dõi điện áp bình ắc quy 12V xe máy (dải đo thực tế từ 10.0V đến 15.0V khi sạc):
+```text
+Cực dương Bình Ắc quy (V_BAT: 12V - 14.4V)
+           │
+          ┌┴┐
+          │ │ R1 = 10kΩ (Điện trở cầu trên)
+          └┬┘
+           ├────────────────────────────► Nối vào GPIO 2 (ESP32-C3 ADC1_CH2)
+          ┌┴┐                            (V_ADC = V_BAT / 11)
+          │ │ R2 = 1kΩ (Điện trở cầu dưới)
+          └┬┘
+           │
+          GND (Mass chung xe máy)
 ```
-- **Tại sao sử dụng `HardwareSerial r503Serial(1)`?**
-  - ESP32-C3 chỉ có 2 bộ UART cứng: UART 0 và UART 1. Nhờ cờ cấu hình `-DARDUINO_USB_CDC_ON_BOOT=1` trong `platformio.ini`, cổng Serial debug đi qua USB CDC nội bộ, giải phóng hoàn toàn UART 1 cho GPIO 0 (RX) và GPIO 1 (TX).
-- **Tại sao bắt buộc ép kiểu `(Stream*)&r503Serial`?**
-  - Thư viện `Adafruit_Fingerprint` có 2 hàm khởi tạo: `(HardwareSerial*)` và `(Stream*)`.
-  - Nếu truyền `&r503Serial` thông thường, thư viện sẽ gọi Constructor 1 (`hwSerial = hs`). Khi gọi hàm thư viện, nó sẽ vô tình kích hoạt `hwSerial->begin(baudrate)` làm reset chân RX/TX về mặc định (`-1, -1`), gây **mất kết nối phần cứng với R503**.
-  - Ép kiểu sang `(Stream*)&r503Serial` buộc C++ sử dụng Constructor 2 (`mySerial = serial`). Cổng UART được xem như luồng dữ liệu byte trừu tượng, quyền cấu hình chân GPIO 0 và GPIO 1 thuộc toàn quyền của bạn.
-- **Vòng lặp quét Baudrate an toàn (Failsafe Baud Scan)**:
-  - Khi quét qua danh sách baudrate `{57600, 9600, 115200, 19200, 38400}`, mỗi lần thử thất bại phải gọi `r503Serial.end(); delay(20);` trước khi gọi `r503Serial.begin()` mới để reset sạch FIFO và ngắt UART của ESP32-C3, tránh treo vi điều khiển.
+- **Công thức tính toán phân áp**:  
+  $$V_{ADC} = V_{BAT} \times \frac{R_2}{R_1 + R_2} = V_{BAT} \times \frac{1\text{k}\Omega}{10\text{k}\Omega + 1\text{k}\Omega} = \frac{V_{BAT}}{11} \approx 0.0909 \times V_{BAT}$$  
+- **Bảng quy đổi điện áp mẫu**:
+  - Khi $V_{BAT} = 12.0\text{V}$ (Bình bình thường) $\rightarrow V_{ADC} = 1.091\text{V}$ ($1091\text{mV}$).
+  - Khi $V_{BAT} = 12.6\text{V}$ (Bình đầy) $\rightarrow V_{ADC} = 1.145\text{V}$ ($1145\text{mV}$).
+  - Khi $V_{BAT} = 14.4\text{V}$ (Đang nổ máy sạc dynamo) $\rightarrow V_{ADC} = 1.309\text{V}$ ($1309\text{mV}$).
+  - Khi $V_{BAT} = 11.5\text{V}$ (Cảnh báo bình yếu) $\rightarrow V_{ADC} = 1.045\text{V}$ ($1045\text{mV}$).
+- **Bảo vệ và tuyến tính**: Cấu hình `analogSetAttenuation(ADC_11db)` cho phép dải đo tuyến tính lên đến $2.5\text{V} - 3.1\text{V}$, tương đương chịu được điện áp ắc quy vọt đỉnh lên tới $> 27\text{V}$, triệt tiêu nguy cơ hỏng chân vi điều khiển.
+- **Lưu ý Strapping Pin GPIO 2**: Trong ESP32-C3, GPIO 2 là strapping pin nhưng chỉ được MCU kiểm tra khi GPIO 9 = 0 (Download Mode). Trong chế độ hoạt động bình thường (Run Mode, GPIO 9 = 1), trở phân áp $1\text{k}\Omega$ xuống GND hoàn toàn không ảnh hưởng tới quá trình khởi động nạp code từ Flash SPI.
+
+### 2.5 Sơ đồ kết nối Module thu sóng RF 433MHz (GPIO 5 - Chân VT Active HIGH)
+Chân **GPIO 5** nhận trực tiếp tín hiệu từ chân **VT (Valid Transmission)** của các module thu sóng 433MHz phổ biến (RX480E, RX480R, PT2272, SYN480R):
+```text
+  Module Thu RF 433MHz                     ESP32-C3 SuperMini
+ ┌─────────────────────────┐              ┌──────────────────┐
+ │ VCC (3.3V)              │<────────────>│ 3.3V             │
+ │ GND                     │<────────────>│ GND              │
+ │ VT (Valid Transmission) │─────────────>│ GPIO 5 (RTC WAKE)│
+ └─────────────────────────┘              └──────────────────┘
+```
+- **Nguyên lý hoạt động**:  
+  - Khi ở trạng thái chờ (không có nút bấm remote): Chân VT giữ mức **LOW (0V)**.
+  - Khi người dùng bấm nút trên remote RF 433MHz: Module giải mã thành công mã lệnh và kéo chân VT lên mức **HIGH (3.3V)** trong suốt thời gian bấm giữ nút.
+  - Firmware cấu hình `pinMode(GPIO 5, INPUT_PULLDOWN)` để tránh trôi áp, và bắt sự kiện `digitalRead(GPIO 5) == HIGH` với thời gian trễ chống dội (debounce cooldown) $1500\text{ms}$.
+- **Đánh thức từ Deep Sleep (Tầng 2)**:  
+  Sử dụng ngắt RTC mức cao: `esp_deep_sleep_enable_gpio_wakeup((1ULL << RF_LOCATE_PIN), ESP_GPIO_WAKEUP_GPIO_HIGH);` giúp MCU thức dậy tức thì trong $15\text{ms}$ để kích hoạt còi và xi-nhan tìm xe.
 
 ---
 
-## 3. CẤU TRÚC CÂY THƯ MỤC TOÀN BỘ DỰ ÁN
+## 3. BỘ NHỚ FLASH NVS & BẢNG PHÂN VÙNG DUAL OTA (4MB FLASH)
 
+### 3.1 Cấu hình phân vùng Dual OTA (`partitions.csv`)
+Dự án phân bổ 4MB Flash của ESP32-C3 theo mô hình Dual-Partition chuẩn công nghiệp, cho phép nâng cấp chương trình qua Bluetooth BLE mà không lo bị brick vi điều khiển:
+
+```csv
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x4000,   # 16 KB: Lưu khóa bí mật, cấu hình xe, danh bạ vân tay
+otadata,  data, ota,     0xd000,   0x2000,   #  8 KB: Bootloader quản lý active partition
+app0,     app,  ota_0,   0x10000,  0x1e0000, # 1.875 MB: Phân vùng chạy chính (Factory/Current)
+app1,     app,  ota_1,   0x1f0000, 0x1e0000, # 1.875 MB: Phân vùng nạp OTA không dây
+```
+
+### 3.2 Quy hoạch cấu trúc Namespaces trong Flash NVS (`Preferences`)
+Hệ thống sử dụng thư viện `Preferences` (Non-Volatile Storage) với 4 namespaces độc lập, đảm bảo dữ liệu không bị ghi đè lẫn nhau:
+
+| Namespace | Key | Kiểu dữ liệu | Giá trị mặc định | Diễn giải chức năng |
+| :--- | :--- | :---: | :---: | :--- |
+| **`"safe_key"`** | `"master_key"` | `String` | `"271000"` | Mật khẩu quản trị và mã Passkey BLE 6 số |
+| | `"is_unlocked"`| `bool` | `false` | Trạng thái nguồn xe (khôi phục tức thì khi mất điện nguồn) |
+| **`"fingerprint"`**| `"name_<id>"` | `String` | `"Vân tay <id>"` | Tên gợi nhớ tương ứng với từng ID vân tay (1..200) |
+| | `"sec_level"` | `int` | `2` | Mức bảo mật R503 (1: Dễ dãi $\rightarrow$ 5: Khắt khe) |
+| | `"scan_win"` | `int` | `1200` | Thời gian quét đối chiếu liên tục khi chạm ngón (ms) |
+| | `"enroll_mode"`| `int` | `4` | Chế độ lấy mẫu vân tay: 2 lần chạm hoặc 4 lần chạm góc rộng |
+| | `"send_img"` | `bool` | `false` | Bật/Tắt truyền ảnh vân tay quang học lên app khi nạp mẫu |
+| **`"rain_config"`**| `"enabled"` | `bool` | `false` | Bật/Tắt chế độ chống nước mưa (Anti-Rain) |
+| | `"touch_hold"` | `int` | `500` | Thời gian chạm giữ tối thiểu (ms) để lọc giọt nước lướt qua |
+| | `"max_wrong"` | `int` | `5` | Ngưỡng quẹt sai tối đa trước khi tạm khóa cảm biến |
+| | `"cooldown"` | `int` | `30` | Thời gian tạm khóa cảm biến khi kích hoạt bảo vệ mưa (giây) |
+| | `"auto_off"` | `int` | `3600` | Thời gian tự tắt chế độ mưa (giây, 0 = không tự tắt) |
+| **`"led_cfg"`** | 12 tham số | `uint8_t` | *(Mặc định tối ưu)*| Cấu hình Mode, Color, Speed cho 4 sự kiện đèn Aura RGB R503 |
+
+---
+
+## 4. GIAO THỨC TRUYỀN THÔNG BLE & BẢO MẬT PHẦN CỨNG AES-128 SMP
+
+### 4.1 Thông số BLE GATT Service & UUIDs
+- **Tên thiết bị phát sóng (Device Name)**: `XE_tsmart_BLE`
+- **Mức công suất phát sóng (TX Power)**: `ESP_PWR_LVL_P9` (+9dBm - Mức cực đại, chống rớt sóng trong cốp xe)
+- **Kích thước gói tin đệm (MTU)**: `517 bytes`
+- **Danh mục UUIDs**:
+  - **Service UUID**: `0000ff01-0000-1000-8000-00805f9b34fb`
+  - **Command / Feedback Characteristic UUID**: `0000ff02-0000-1000-8000-00805f9b34fb`  
+    *Thuộc tính*: `READ | READ_ENC | READ_AUTHEN | WRITE | WRITE_ENC | WRITE_AUTHEN | WRITE_NR | NOTIFY`
+  - **OTA Data Characteristic UUID**: `0000ff03-0000-1000-8000-00805f9b34fb`  
+    *Thuộc tính*: `WRITE | WRITE_NR | WRITE_ENC | WRITE_AUTHEN`
+
+### 4.2 Tầng bảo mật phần cứng BLE Security Manager Protocol (SMP)
+Dự án áp dụng cơ chế bảo mật phần cứng BLE chuẩn công nghiệp theo mô hình **Phòng thủ chiều sâu (Defense-in-Depth)**:
+1. **Ghép đôi & Khóa bảo mật (Pairing & Bonding)**:  
+   - Cờ cấu hình: `setSecurityAuth(bonding = true, mitm = true, sc = true)`.
+   - Chuẩn bảo mật **LE Secure Connections (LESC)** sử dụng mật mã đường cong Elliptic P-256 kết hợp mã hóa luồng dữ liệu **AES-128**.
+   - Thiết bị lạ chưa ghép đôi khi cố đọc/ghi sẽ bị phần cứng từ chối với lỗi `BLE_ATT_ERR_INSUFFICIENT_AUTHEN`. Hệ điều hành Android sẽ tự động bật hộp thoại hệ thống yêu cầu nhập mã PIN.
+2. **Mã Passkey 6 số đồng bộ**:  
+   - Passkey phần cứng được đồng bộ trực tiếp từ `SECRET_KEY` (mặc định: `271000`).
+   - I/O Capability: `BLE_HS_IO_DISPLAY_ONLY`. Xe cung cấp mã cố định, điện thoại chịu trách nhiệm nhập mã.
+3. **Cơ chế chống dò mã (Anti-Brute-Force Lockout)**:  
+   - Nếu Client cố tình gửi 3 gói tin sai `SECRET_KEY` liên tiếp, ESP32 sẽ chủ động hủy kết nối BLE và tạm ngắt giao dịch để ngăn chặn kẻ xấu dò mật khẩu.
+4. **Lệnh thu hồi khóa ghép đôi (`UNPAIR_ALL`)**:  
+   - Cho phép người dùng xóa sạch toàn bộ danh sách Bonding trên Flash NVS khi mất điện thoại hoặc đổi chủ xe.
+
+### 4.3 Định dạng gói tin truyền thông
+Mọi gói tin điều khiển từ App gửi tới ESP32 bắt buộc tuân thủ cấu trúc:
+$$\text{<SECRET\_KEY>|<COMMAND>[|<PARAM1>|<PARAM2>|...]\n}$$
+
+### 4.4 Bảng mã lệnh đầy đủ (App $\rightarrow$ ESP32-C3)
+
+| Nhóm chức năng | Lệnh (`cmd`) | Tham số (`params`) | Hành vi xử lý trên ESP32-C3 |
+| :--- | :--- | :--- | :--- |
+| **Điều khiển cơ bản** | `1` | Không | **Mở khóa xe**: Đóng Relay 1 (ACC ON), lưu flash, đèn Aura xanh, bíp 1 tiếng. |
+| | `0` | Không | **Khóa xe**: Ngắt Relay 1 (ACC OFF), lưu flash, đèn Aura đỏ, bíp 2 tiếng. |
+| | `2` | Không | **Đề xe**: Kích Relay 2 trong 1.5s (chỉ thực hiện khi xe đang mở khóa). |
+| | `3` | Không | **Tìm xe**: Kích Relay 3 (còi & xi-nhan) trong 3.0s. |
+| | `TELE` / `STATUS` | Không | Yêu cầu ESP32 phản hồi trạng thái xe và dữ liệu Telemetry tức thời. |
+| **Quản trị bảo mật** | `9` | `<NEW_KEY>` | **Đổi mã bảo mật**: Lưu `SECRET_KEY` mới vào NVS và cập nhật Passkey BLE SMP. |
+| | `UNPAIR_ALL` | Không | **Xóa toàn bộ thiết bị ghép đôi**: Xóa sạch danh sách Bonding trong NVS. |
+| | `SLEEP_NOW` | Không | Yêu cầu ESP32 chuyển ngay sang **Tầng 2: Deep Sleep**. |
+| **Quản lý vân tay** | `FP_LIST` | Không | Yêu cầu gửi danh sách toàn bộ ID và tên vân tay hiện có. |
+| | `FP_ENROLL` | `<TÊN>[\|IMG]` | **Thêm vân tay mới**: Khởi chạy FreeRTOS Task lấy mẫu vân tay 2 hoặc 4 bước. |
+| | `FP_CANCEL` | Không | Hủy bỏ tiến trình lấy mẫu vân tay đang diễn ra. |
+| | `FP_DELETE` | `<ID>` | Xóa mẫu vân tay trong cảm biến R503 và xóa tên trong Flash NVS. |
+| | `FP_RENAME` | `<ID>\|<TÊN_MỚI>`| Đổi tên gợi nhớ của vân tay trong Flash NVS. |
+| | `FP_CLEAR` | `CONFIRM` | Xóa sạch toàn bộ thư viện vân tay trên R503 và Flash NVS. |
+| | `CAPTURE_FP_IMG` | Không | Chụp ảnh quang học thực tế và truyền tải về điện thoại qua các chunk. |
+| **Tinh chỉnh cảm biến**| `GET_FP_CFG` | Không | Đọc cấu hình độ nhạy, thời gian quét và chế độ lấy mẫu của R503. |
+| | `SET_FP_CFG` | `<sec>\|<win>\|<mod>\|<img>`| Lưu cấu hình: Security Level (1..5), Scan Window (ms), Mode (2/4), Send Image. |
+| | `TEST_FP` | `<dur_sec>` | Bật chế độ Live Test cảm biến vân tay trong N giây (không bật/tắt xe). |
+| **Chế độ nước mưa** | `GET_RAIN` | Không | Đọc toàn bộ thông số chế độ chống nước mưa hiện tại. |
+| | `TOGGLE_RAIN` | `1` hoặc `0` | Bật hoặc tắt nhanh chế độ chống nước mưa. |
+| | `SET_RAIN` | `<en>\|<hld>\|<wrg>\|<cd>\|<off>`| Cài đặt: Bật/Tắt, Chạm giữ (ms), Quẹt sai tối đa, Cooldown (s), Tự tắt (s). |
+| **Đèn vòng Aura RGB** | `GET_LED_CFG` | Không | Đọc 12 tham số màu sắc & hiệu ứng cho 4 sự kiện đèn. |
+| | `SET_LED_CFG` | `12 tham số` | Lưu cấu hình đèn Aura cho 4 sự kiện (Unlocked, Locked, Success, Error). |
+| | `TEST_LED` | `<m>\|<c>\|<s>\|<cnt>`| Thử nghiệm nhanh hiệu ứng đèn thực tế trên R503 (Live Test). |
+| **Nâng cấp OTA** | `OTA_BEGIN` | `<size>\|<md5>` | Khởi tạo tiến trình nạp OTA, cấp phát phân vùng và kiểm tra điều kiện an toàn. |
+| | `OTA_END` | Không | Kết thúc truyền dữ liệu, xác thực checksum MD5 và tự khởi động lại MCU. |
+| | `OTA_ABORT` | Không | Hủy bỏ tiến trình nạp OTA và giải phóng tài nguyên. |
+
+### 4.5 Bảng phản hồi trạng thái từ ESP32 gửi lên App (`FB|<STATUS>`)
+
+| Gói tin phản hồi | Diễn giải ngữ nghĩa kỹ thuật |
+| :--- | :--- |
+| `FB\|DA_MO_KHOA` | Xe đã kích hoạt đóng Relay 1 (ACC ON) thành công |
+| `FB\|DA_KHOA_XE` | Xe đã ngắt Relay 1 (ACC OFF) thành công |
+| `FB\|DA_DE_MAY` | Đã kích đóng Relay 2 đề nổ máy |
+| `FB\|DA_TIM_XE` | Đang kích Relay 3 phát tín hiệu còi / xi-nhan tìm xe |
+| `FB\|TELE\|<V>\|<TEMP>\|<STAT>`| Dữ liệu Telemetry: Điện áp ắc quy, Nhiệt độ chip ESP32, Trạng thái khóa |
+| `FB\|DA_DOI_KEY` | Đã đổi mã bảo mật và Passkey BLE thành công |
+| `FB\|UNPAIR_ALL_OK` | Đã xóa sạch toàn bộ danh sách thiết bị Bonding |
+| `FB\|LOI_SAI_KEY` | Mã bảo mật gửi kèm không hợp lệ |
+| `FB\|FP_LIST_START` | Bắt đầu chuỗi truyền danh sách vân tay |
+| `FB\|FP_ITEM\|<ID>\|<NAME>` | Dữ liệu từng mẫu vân tay đã đăng ký |
+| `FB\|FP_LIST_END` | Hoàn tất truyền toàn bộ danh sách vân tay |
+| `FB\|FP_ENROLL_STEP_1\|<ID>` | Vui lòng áp ngón tay lần 1 lên cảm biến R503 |
+| `FB\|FP_ENROLL_STEP_2\|<ID>` | Nhấc ngón tay ra và áp lại lần 2 |
+| `FB\|FP_ENROLL_OK\|<ID>\|<NAME>`| Đăng ký vân tay mới thành công và đã lưu vào NVS |
+| `FB\|FP_ENROLL_FAILED\|<LÝ_DO>`| Đăng ký thất bại (Timeout, mờ, không khớp góc chạm) |
+| `FB\|FP_MATCHED\|<ID>\|<NAME>` | Quẹt vân tay đúng $\rightarrow$ Đổi trạng thái Bật/Tắt xe thành công |
+| `FB\|FP_NOT_MATCH` | Cảnh báo: Quẹt vân tay không trùng khớp |
+| `FB\|LED_CFG_OK` | Đã lưu cấu hình 12 tham số đèn Aura RGB thành công |
+| `FB\|RAIN_CONFIG\|<7 tham số>`| Cấu hình chi tiết chế độ chống nước mưa kèm thời gian đếm ngược còn lại |
+| `FB\|OTA_READY` | ESP32 đã sẵn sàng nhận các khối dữ liệu binary firmware qua OTA |
+| `FB\|OTA_SUCCESS` | Nâng cấp OTA thành công 100%, chuẩn bị nạp phân vùng mới |
+| `FB\|OTA_ERR_VEHICLE_ON` | Từ chối nạp OTA vì xe đang mở khóa nguồn điện ACC (Quy tắc an toàn) |
+| `FB\|OTA_ERR_BUSY` | Từ chối OTA vì ESP32 đang bận lấy mẫu vân tay hoặc chụp ảnh |
+| `FB\|OTA_ERR_INVALID_SIZE` | Kích thước file firmware vượt quá dung lượng phân vùng 1.875MB |
+| `FB\|OTA_ERR_VERIFY` | Lỗi kiểm tra tính toàn vẹn: Checksum MD5 không khớp |
+| `FB\|OTA_TIMEOUT` | Quá 15 giây không nhận thêm khối dữ liệu, tiến trình tự hủy |
+
+---
+
+## 5. ĐẶC TẢ QUY TRÌNH NẠP FIRMWARE TỪ XA BLE OTA (OVER-THE-AIR)
+
+### 5.1 Kiến trúc nạp nhị phân qua BLE
+Quy trình nạp firmware từ xa được điều phối độc lập bởi `OtaManager.kt` trên Android và thư viện `Update.h` trên ESP32-C3:
+- **Kênh truyền dữ liệu riêng biệt**: Sử dụng `OTA_DATA_UUID` (`0000ff03-0000-1000-8000-00805f9b34fb`) với thuộc tính ghi không phản hồi `WRITE_NR` để tối ưu băng thông.
+- **Kích thước khối nạp (Chunk Size)**: `240 bytes` / gói (phù hợp hoàn hảo với MTU 517 bytes).
+- **Độ trễ điều tiết (Pacing Delay)**: `CHUNK_DELAY_MS = 8ms` giữa các gói để tránh tràn bộ đệm Flash SPI trên vi điều khiển.
+- **Kiểm tra tính toàn vẹn (Integrity Check)**: Tính toán mã băm MD5 32 ký tự trước khi truyền và so sánh tự động trên vi điều khiển qua `Update.setMD5()`.
+
+### 5.2 Sơ đồ trình tự tiến trình OTA (OTA Sequence Flow)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Người dùng
+    participant App as Android OtaManager
+    participant MCU as ESP32-C3 (Update.h)
+    participant Flash as Flash Partition (ota_1)
+
+    User->>App: Chọn file firmware.bin từ máy
+    App->>App: Đọc bytes, kiểm tra size <= 1.875MB & tính MD5
+    App->>MCU: OTA_BEGIN|<size>|<md5>
+    
+    alt Xe đang mở khóa (isUnlocked == true)
+        MCU-->>App: FB|OTA_ERR_VEHICLE_ON
+        App-->>User: Cảnh báo: Tắt khóa xe trước khi cập nhật!
+    else ESP32 đang bận
+        MCU-->>App: FB|OTA_ERR_BUSY
+    else Hợp lệ
+        MCU->>MCU: Tạm ngắt cảm biến rung, nút bấm, sleep
+        MCU->>Flash: Update.begin(size, U_FLASH) & Update.setMD5(md5)
+        MCU-->>App: FB|OTA_READY
+        
+        loop Truyền khối dữ liệu (Chunk Streaming)
+            App->>MCU: Gửi chunk 240 bytes qua OTA_DATA_UUID (WRITE_NR)
+            MCU->>Flash: Update.write(chunk)
+            App->>App: Cập nhật Progress Bar (%, tốc độ KB/s)
+            Note over App,MCU: Delay 8ms chống tràn buffer Flash
+        end
+        
+        App->>MCU: OTA_END
+        MCU->>Flash: Update.end(true) & Kiểm tra MD5
+        
+        alt Khớp MD5 & Ghi thành công
+            MCU-->>App: FB|OTA_SUCCESS
+            App-->>User: Cập nhật 100% thành công! Xe đang khởi động lại...
+            MCU->>MCU: delay(1000) -> esp_restart() boot vào app1
+        else Sai Checksum / Lỗi ghi
+            MCU-->>App: FB|OTA_ERR_VERIFY / FB|OTA_ERR_WRITE
+            MCU->>Flash: Update.abort() - Giữ nguyên app0
+            App-->>User: Báo lỗi cập nhật!
+        end
+    end
+```
+
+### 5.3 Quy tắc an toàn chống Brick vi điều khiển (Fail-Safe Rollback)
+1. **Khóa chức năng khi nạp**: Khi `isOtaUpdating == true`, firmware tạm khóa toàn bộ việc quét vân tay, cảm biến rung, và vô hiệu hóa chế độ ngủ Deep Sleep.
+2. **Timeout 15 giây**: Nếu quá 15 giây không nhận thêm khối dữ liệu mới (do mất sóng hoặc thoát app), ESP32 tự động gọi `Update.abort()`, hủy bỏ phân vùng nháp và quay về hoạt động bình thường.
+3. **Mất kết nối đột ngột (GATT Disconnect)**: Sự kiện `onDisconnect()` tự động phát hiện nếu đang OTA sẽ lập tức hủy tiến trình an toàn, bảo vệ phân vùng đang chạy hiện tại.
+
+---
+
+## 6. ĐẶC TẢ CẢM BIẾN VÂN TAY R503 & ĐÈN VÒNG HÀO QUANG AURA RGB 360°
+
+### 6.1 Giao thức điều khiển đèn nhẫn hào quang (Aura LED Opcode 0x35)
+Theo tài liệu kỹ thuật Hangzhou Grow R503 User Manual V1.4.1, cụm LED RGB tích hợp trên mặt lăng kính được điều khiển trực tiếp qua Opcode `0x35`:
+- **Gói lệnh chuẩn UART**:
+  $$\text{0xEF 0x01 | 0xFF 0xFF 0xFF 0xFF | 0x01 | 0x00 0x07 | 0x35 <Mode> <Color> <Speed> <Count> | Checksum}$$
+- **7 Mã màu phần cứng (Hardware Color Codes)**:
+  1. `0x01`: 🔴 **Đỏ (Sport Red)** (`#FF2D55`) - Báo lỗi / Quẹt sai / Cảnh báo chống trộm.
+  2. `0x02`: 🔵 **Xanh Dương (Ocean Blue)** (`#007AFF`) - Trạng thái sẵn sàng / Xe đang bật điện.
+  3. `0x03`: 🟣 **Tím (Cyberpunk Purple)** (`#AF52DE`) - Cảnh báo mất kết nối BLE / Đang đăng ký vân tay.
+  4. `0x04`: 🟢 **Xanh Lá (Emerald Green)** (`#34C759`) - Quét đúng vân tay / Mở khóa thành công.
+  5. `0x05`: 🟡 **Vàng (Solar Gold)** (`#FFCC00`) - Bộ nhận diện Luxury Gold của xe.
+  6. `0x06`: 🐬 **Xanh Ngọc / Lơ (Cyan Neon)** (`#00F5D4`) - Hiện đại thể thao.
+  7. `0x07`: ⚪ **Trắng (Pure White)** (`#FFFFFF`) - Sáng tối đa.
+- **6 Kiểu hiệu ứng ánh sáng (Control Mode Codes)**:
+  - `0x01` (`LED_MODE_BREATHING`): Thở êm dịu theo chu kỳ sin.
+  - `0x02` (`LED_MODE_FLASHING`): Nhấp nháy theo tần số.
+  - `0x03` (`LED_MODE_ON`): Bật sáng tĩnh liên tục.
+  - `0x04` (`LED_MODE_OFF`): Tắt hoàn toàn (tiết kiệm điện năng bình ắc quy).
+  - `0x05` (`LED_MODE_GRADUAL_ON`): Sáng từ từ.
+  - `0x06` (`LED_MODE_GRADUAL_OFF`): Tắt từ từ.
+
+### 6.2 Cấu hình 4 sự kiện độc lập (`led_cfg`)
+Người dùng có thể cài đặt màu sắc và kiểu nháy riêng biệt cho từng trạng thái của xe:
+1. `EVT_UNLOCKED`: Khi xe đang mở khóa nguồn điện ACC (Mặc định: Thở xanh dương, speed 120, count 0 lặp vô hạn).
+2. `EVT_LOCKED`: Khi xe đang khóa đỗ ngoài bãi (Mặc định: Tắt hoàn toàn để bảo vệ bình ắc quy xe máy).
+3. `EVT_SUCCESS`: Khi quét đúng vân tay hoặc mở xe thành công (Mặc định: Nháy xanh dương 2 lần).
+4. `EVT_ERROR`: Khi quét sai vân tay hoặc báo động (Mặc định: Nháy đỏ 3 lần kèm còi).
+
+---
+
+## 7. CHẾ ĐỘ CHỐNG NƯỚC MƯA (ANTI-RAIN) & TINH CHỈNH CẢM BIẾN
+
+### 7.1 Cơ chế chống nước mưa (Anti-Rain Protection)
+Khi rửa xe hoặc đi dưới trời mưa lớn, các giọt nước đọng trên mặt lăng kính có thể kích hoạt chân cảm ứng điện dung `WAKEUP` làm ESP32 thức dậy liên tục và gây báo lỗi quét sai. Chế độ Anti-Rain giải quyết triệt để vấn đề này:
+1. **Lọc tiếp xúc lướt (Touch Hold Filter)**:  
+   - Tham số `touchHoldMs` (mặc định: `500ms`).
+   - Khi ngón tay chạm vào, firmware yêu cầu giữ ngón liên tục tối thiểu 500ms. Giọt nước chảy lướt qua dưới 500ms sẽ bị loại bỏ ngay lập tức mà không kích hoạt chu trình chụp ảnh vân tay.
+2. **Khóa tạm thời khi bị nhiễu (Cooldown Lockout)**:  
+   - Tham số `maxWrongAttempts` (mặc định: `5` lần) và `cooldownSec` (mặc định: `30` giây).
+   - Nếu phát hiện quẹt sai liên tục quá 5 lần (do nước đọng liên tục), hệ thống tạm thời ngắt quét vân tay trong 30 giây để bảo vệ CPU và tránh hú còi làm phiền.
+3. **Bộ đếm thời gian tự tắt (Auto-Off Timer)**:  
+   - Tham số `autoOffSec` (mặc định: `3600s` = 1 giờ).
+   - Chế độ mưa sẽ tự động tắt sau thời gian hẹn giờ để đưa cảm biến về độ nhạy chạm tức thời thông thường.
+
+### 7.2 Tinh chỉnh độ nhạy & Chế độ lấy mẫu vân tay
+Firmware cho phép cấu hình trực tiếp từ giao diện Android:
+- **Mức bảo mật cảm biến (Security Level)**: Giá trị từ `1` (nhận diện rất dễ, chấp nhận ngón tay chai ráp) đến `5` (rất nghiêm ngặt). Mặc định tối ưu là `2`.
+- **Cửa sổ đối chiếu (Scan Window)**: Thời gian duy trì quét tìm kiếm khi ngón tay áp vào (`400ms` đến `3000ms`, mặc định: `1200ms`).
+- **Chế độ nạp mẫu (Enroll Mode)**:
+  - *Chế độ 2 chạm*: Lấy mẫu nhanh truyền thống (chạm lần 1 và lần 2).
+  - *Chế độ 4 chạm*: Lấy mẫu góc rộng đa hướng (chính diện, nghiêng trái, nghiêng phải, góc trên), nâng tỷ lệ nhận diện một chạm thành công lên **99.4%**.
+- **Truyền ảnh quang học thực tế (Live Fingerprint Image Streaming)**:  
+  Hỗ trợ trích xuất toàn bộ dữ liệu ảnh từ ImageBuffer của R503, chia nhỏ thành các gói `FP_IMG_CHUNK|<idx>|<total>|<base64>` gửi về Android để tái tạo hình ảnh vân tay trực quan trên màn hình điện thoại.
+
+---
+
+## 8. QUẢN LÝ NGUỒN 2 TẦNG (TIER 1 POWER SAVING & TIER 2 DEEP SLEEP)
+
+Xe máy thường đỗ lâu ngày trong nhà hoặc bãi đỗ. Hệ thống áp dụng cơ chế quản lý năng lượng 2 tầng để bảo toàn 100% dung lượng bình ắc quy 12V:
+
+```text
+[ XE MỞ KHÓA (isUnlocked = true) ]
+   │  BLE Advertising: Fast Mode (100ms - 200ms)
+   │  Đáp ứng lệnh tức thì không độ trễ.
+   ▼
+[ XE KHÓA (isUnlocked = false) ] ───> BƯỚC VÀO TẦNG 1 (POWER SAVING ADVERTISING)
+   │  - Chu kỳ BLE Advertising giãn ra 1280ms (2048 * 0.625ms)
+   │  - Giảm 85% năng lượng tiêu thụ không dây.
+   │  - Điện thoại đến gần vẫn tự động kết nối được.
+   │
+   │  (Nếu sau 24 giờ liên tục không có kết nối BLE và không ai chạm xe)
+   ▼
+[ BƯỚC VÀO TẦNG 2: DEEP SLEEP HOÀN TOÀN ]
+   - Ngắt CPU, ngắt Radio Bluetooth, ngắt UART.
+   - Dòng tiêu thụ giảm xuống mức micro-ampe (< 20µA). Bình ắc quy có thể đỗ 6 tháng không hết điện.
+   - Cấu hình 3 ngắt RTC Wakeup đánh thức MCU trong 15 mili-giây:
+       1. Chạm ngón tay vào lăng kính R503 (GPIO 3 - Active LOW)
+       2. Cảm biến rung chống trộm SW-420 (GPIO 4 - Active HIGH, chỉ kích hoạt khi BẬT chống dắt)
+       3. Bấm Remote tìm xe RF 433MHz (GPIO 5 - Active HIGH)
+```
+
+---
+
+## 9. ĐẶC TẢ ỨNG DỤNG ANDROID (`:app`) & ĐỒNG HỒ WEAR OS (`:wear`)
+
+### 9.1 Module Ứng Dụng Điện Thoại Android (`:app`)
+Được xây dựng theo ngôn ngữ thiết kế **Cyber Luxury Gold & Obsidian**, phân chia thành 4 Tab chính:
+1. **Tab 1: Bảng Điều Khiển Trung Tâm (Cockpit)**:
+   - **Nút Hero Push-Start 3D Vàng Hoàng Gia (154px)**: Chạm kích hoạt nguồn điện ACC (Relay 1), hiệu ứng sóng ánh sáng Neon Gold bung tỏa.
+   - **Nút Khởi Động Động Cơ (Engine Start)**: Kích Relay 2 đề nổ máy khi xe đã mở khóa.
+   - **Mô hình Digital-Twin Xe Honda SH**: Đèn pha tự bật sáng khi mở xe, hiệu ứng rung máy khi nổ và nháy đèn xi-nhan khi tìm xe.
+   - **Thanh trạng thái Telemetry**: Hiển thị điện áp ắc quy thực tế (V), nhiệt độ chip ESP32 (°C), và cường độ tín hiệu BLE RSSI (dBm).
+2. **Tab 2: Radar Tìm Xe 360° (Finder & Proximity)**:
+   - Radar quét khoảng cách thời gian thực với điểm Blip phản hồi động theo khoảng cách RSSI.
+   - Nút bật còi & đèn khẩn cấp tìm xe (Relay 3).
+   - Nút **Đèn Dẫn Đường 30s**: Giữ đèn pha sáng trong 30 giây để soi đường trong hầm tối.
+   - Ghim vị trí đỗ xe thông minh (lưu ghi chú vị trí cột/tầng hầm).
+3. **Tab 3: Trung Tâm Quản Lý Vân Tay Sinh Trắc Học (R503 Biometric Hub)**:
+   - Danh sách vân tay trực quan với chức năng Đổi tên, Xóa từng ngón, Quét thử trực tiếp.
+   - Hộp thoại nạp vân tay Failsafe: Đồng hồ đếm ngược, hướng dẫn chạm ngón, hiển thị tiến trình % và ảnh vân tay quang học thực tế.
+   - Bảng điều khiển Bánh Xe Màu RGB 360° tương tác chạm/vuốt (`RgbColorWheelView.kt`) cấu hình 4 sự kiện đèn Aura.
+   - Cài đặt Chế độ Chống Nước Mưa và Tinh chỉnh cảm biến vân tay chuyên sâu.
+4. **Tab 4: Hồ Sơ Garage & Cài Đặt Bảo Mật Nâng Cao**:
+   - Quản lý tên gợi nhớ xe (`vehicleCustomName`), biển số xe, đồng bộ tức thì trên toàn bộ giao diện.
+   - Đổi mã bí mật `SECRET_KEY` và mã PIN ghép đôi Passkey BLE.
+   - Nút thu hồi toàn bộ thiết bị đã ghép đôi (`UNPAIR_ALL`).
+   - Cập nhật Firmware không dây BLE OTA (`OtaManager.kt`) kèm giao diện tiến trình chi tiết.
+   - Lịch sử mở khóa xe (`UnlockHistoryManager.kt`): Lưu trữ 100 sự kiện gần nhất (Thời gian, Kiểu mở, Tên vân tay).
+
+### 9.2 Module Ứng Dụng Đồng Hồ Wear OS (`:wear`)
+- Phát triển bằng **Jetpack Compose for Wear OS**:
+  - Giao diện tối ưu cho màn hình tròn AMOLED, nền đen tuyệt đối tiết kiệm pin.
+  - Vòng tròn trạng thái phản hồi màu sắc động: Đỏ (Xe Khóa), Xanh Lá (Xe Mở), Vàng (Đang Đề Máy).
+  - **Thuật toán nhận diện cử chỉ búng tay (Pinch Gesture)**:
+    - Sử dụng cảm biến `Sensor.TYPE_LINEAR_ACCELERATION`.
+    - Khi phát hiện gia tốc đột ngột $> 18\text{ m/s}^2$ với thời gian hồi chiêu $> 1.2\text{s}$, đồng hồ tự động phát xung Haptic rung mạnh và gửi lệnh đề nổ máy tới xe qua điện thoại.
+    - Giới hạn an toàn: Tự động khóa tính năng búng tay sau 2 lần đề nổ liên tiếp để chống kích hoạt ngoài ý muốn khi đang lái xe trên đường xóc.
+  - Đồng bộ trạng thái 2 chiều liên tục qua Google Wearable Data Layer API.
+
+---
+
+## 10. KIẾN TRÚC AN TOÀN FAIL-SAFE & CƠ CHẾ CỨU HỘ SỰ CỐ THỰC TẾ
+
+### 10.1 Nguyên tắc sống còn: Mất kết nối BLE khi xe đang chạy
+> [!CRITICAL]
+> **NGUYÊN TẮC AN TOÀN Ô TÔ BẮT BUỘC**: Tuyệt đối không bao giờ được ngắt nguồn điện ACC (Relay 1) khi xe đang lưu thông ngoài đường, kể cả khi điện thoại hết pin, rơi mất máy hoặc mất kết nối Bluetooth BLE đột ngột.
+
+**Hành vi xử lý chuẩn xác của hệ thống khi mất kết nối BLE**:
+1. ESP32 phát hiện sự kiện `onDisconnect()`:
+   - Kiểm tra biến trạng thái `isUnlocked`.
+   - Nếu `isUnlocked == true`: **DUY TRÌ NGUYÊN TRẠNG THÁI RELAY 1 (ACC TIẾP TỤC ĐÓNG)**. Xe vẫn tiếp tục nổ máy và chạy bình thường 100%.
+2. Phát tín hiệu cảnh báo cho người lái:
+   - Còi bíp nhẹ 2 tiếng ngắn cảnh báo.
+   - Đèn LED Aura trên cảm biến R503 chuyển sang chế độ thở màu **Tím** để báo cho người lái biết điện thoại đã mất kết nối.
+3. Khi người lái dừng xe đến nơi an toàn:
+   - Chủ động chạm ngón tay hợp lệ vào R503 để TẮT XE.
+   - Hoặc vặn chìa khóa cơ zin về vị trí OFF.
+   - Sau khi xe đã tắt, hệ thống lập tức khóa hoàn toàn. Kẻ gian không thể đề nổ lại nếu không có vân tay hoặc chìa khóa cơ.
+
+### 10.2 3 Tầng cứu hộ khẩn cấp khi không có điện thoại
+1. **Tầng 1 - Cảm biến vân tay R503**: Hoạt động hoàn toàn Offline và xử lý cục bộ trên chip ESP32. Chạm ngón tay là mở xe trong 0.5 giây mà không cần mang theo điện thoại.
+2. **Tầng 2 - Ổ khóa cơ vật lý (Đấu song song)**: Tiếp điểm thường mở (NO) của Relay 1 đấu song song trực tiếp với 2 dây công tắc khóa cơ. Cắm chìa vặn lên là nối tắt nguồn ACC cấp điện cho xe, bỏ qua hoàn toàn mạch điện tử (100% Hardware Override).
+3. **Tầng 3 - Remote RF 433MHz Tìm Xe**: Bấm remote cầm tay để xác định vị trí xe trong bãi xe rộng lớn hoặc tầng hầm tối.
+
+### 10.3 Cơ chế chống trộm thông minh
+- **Quẹt sai 3 lần liên tiếp**: Còi báo động hú 6 tiếng liên tục (`beep(6, 120)`), đèn R503 nháy đỏ dữ dội.
+- **Báo động rung lắc khi xe khóa (SW-420)**: Khi xe đang đỗ (`isUnlocked == false`), nếu có kẻ gian bẻ cổ xe hoặc dắt trộm làm rung cảm biến SW-420, ESP32 lập tức phát tín hiệu còi cảnh báo ngắt quãng để xua đuổi trộm.
+
+---
+
+## 11. CẤU TRÚC THƯ MỤC TOÀN DỰ ÁN & HƯỚNG DẪN BUILD / FLASH
+
+### 11.1 Cây thư mục hoàn chỉnh
 ```text
 Tysmartkey/
-├── PROJECT_MASTER_DOCUMENT.md          # [TÀI LIỆU NÀY] Tài liệu chuẩn hệ thống
-├── README.md                           # Giới thiệu & điều hướng
-├── firmware/                           # Firmware PlatformIO nạp cho vi điều khiển
-│   └── esp32 c3/                       # Dự án ESP32-C3 PlatformIO
-│       ├── platformio.ini              # Config board esp32-c3-devkitm-1, NimBLE, Adafruit FP
-│       └── src/
-│           ├── main.cpp                # Mã nguồn chính firmware ESP32-C3 + R503 + NimBLE
-│           └── esp32_blynk.ino.bak     # Bản sao lưu mã nguồn cũ
+├── PROJECT_MASTER_DOCUMENT.md          # [TÀI LIỆU NÀY] Tài liệu kỹ thuật chuẩn toàn hệ thống
+├── README.md                           # Giới thiệu tổng quan & hướng dẫn nhanh
 │
-└── APP Controlesp/                     # Dự án Android Studio (Multi-Module)
+├── firmware/                           # DỰ ÁN PLATFORMIO (FIRMWARE ESP32-C3)
+│   └── esp32 c3/
+│       ├── platformio.ini              # Cấu hình board esp32-c3-devkitm-1, USB CDC, lib_deps
+│       ├── partitions.csv              # Bảng phân vùng Dual OTA (4MB Flash: nvs, otadata, app0, app1)
+│       └── src/
+│           └── main.cpp                # Mã nguồn C++ toàn diện (R503, NimBLE, NVS, OTA, Power Mgmt)
+│
+└── APP Controlesp/                     # DỰ ÁN ANDROID STUDIO (MULTI-MODULE)
     ├── app/                            # MODULE 1: ỨNG DỤNG ĐIỆN THOẠI ANDROID
-    │   ├── src/main/
-    │   │   ├── AndroidManifest.xml     # Khai báo quyền Bluetooth, BLE, Service
-    │   │   ├── java/com/example/control_esp/
-    │   │   │   ├── MainActivity.kt               # Giao diện chính 4 Tab, quản lý vân tay
-    │   │   │   ├── BleManager.kt                 # Quản lý quét & kết nối BLE GATT Server
-    │   │   │   ├── BluetoothController.kt        # Dự phòng Bluetooth Classic
-    │   │   │   └── WearMessageListenerService.kt # Dịch vụ cầu nối ngầm Wear OS <-> BLE
-    │   │   └── res/
-    │   │       ├── layout/
-    │   │       │   ├── activity_main.xml         # Layout 4 tab (Điều khiển, Tìm xe, Vân tay, Cài đặt)
-    │   │       │   └── item_fingerprint.xml      # Layout thẻ hiển thị từng vân tay
-    │   │       ├── menu/bottom_nav_menu.xml      # 4 mục điều hướng
-    │   │       └── drawable/ic_fingerprint.xml   # Icon vector vân tay
-    │   └── build.gradle.kts
+    │   ├── build.gradle.kts            # Cấu hình dependencies (Wearable, Coroutines, Material)
+    │   └── src/main/
+    │       ├── AndroidManifest.xml     # Khai báo quyền Bluetooth Scan/Connect, Service chạy ngầm
+    │       ├── java/com/example/control_esp/
+    │       │   ├── MainActivity.kt               # Giao diện chính 4 Tab, quản lý vân tay & cấu hình
+    │       │   ├── BleManager.kt                 # Quản lý kết nối BLE GATT, Bonding SMP, RSSI
+    │       │   ├── OtaManager.kt                 # Động cơ nạp firmware không dây BLE OTA
+    │       │   ├── UnlockHistoryManager.kt       # Quản lý lưu trữ 100 sự kiện mở khóa offline
+    │       │   ├── RgbColorWheelView.kt          # Custom View bánh xe màu RGB 360° tương tác
+    │       │   ├── BluetoothController.kt        # Module dự phòng Bluetooth Classic
+    │       │   └── WearMessageListenerService.kt # Dịch vụ cầu nối ngầm Wear OS <-> BLE xe
+    │       └── res/
+    │           ├── layout/
+    │           │   ├── activity_main.xml         # Layout 4 tab (Cockpit, Radar, R503, Garage)
+    │           │   ├── dialog_ota_update.xml     # Giao diện nạp OTA với thanh tiến trình & thông số
+    │           │   └── item_fingerprint.xml      # Layout thẻ từng vân tay
+    │           └── drawable/                     # Tài nguyên đồ họa, icons, hình xe SH
     │
     └── wear/                           # MODULE 2: ỨNG DỤNG ĐỒNG HỒ WEAR OS
-        ├── src/main/java/com/example/control_esp/wear/
-        │   └── MainActivity.kt         # Giao diện Compose Wear OS & Cảm biến búng tay đề máy
-        └── build.gradle.kts
+        ├── build.gradle.kts            # Cấu hình Jetpack Compose for Wear OS
+        └── src/main/java/com/example/control_esp/wear/
+            └── MainActivity.kt         # Giao diện Compose tròn, nhận diện cử chỉ búng tay đề máy
 ```
 
----
+### 11.2 Hướng dẫn biên dịch & Nạp Firmware ESP32-C3
+1. **Yêu cầu môi trường**: PlatformIO CLI hoặc VS Code PlatformIO IDE.
+2. **Lệnh biên dịch kiểm tra tính toàn vẹn (Build)**:
+   ```powershell
+   & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -d "firmware/esp32 c3"
+   ```
+   *Kết quả mong đợi*: `[SUCCESS]`, RAM tiêu thụ ~7.5%, Flash tiêu thụ ~31.2%.
+3. **Lệnh nạp qua cổng COM (Cáp USB Type-C)**:
+   ```powershell
+   & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -d "firmware/esp32 c3" -t upload --upload-port COM14
+   ```
+4. **Mở Serial Monitor để quan sát log bắt tay UART và BLE**:
+   ```powershell
+   & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device monitor -d "firmware/esp32 c3" -b 115200
+   ```
 
-## 4. KIẾN TRÚC GIAO THỨC TRUYỀN THÔNG BLE & PHẢN HỒI FEEDBACK
-
-### 4.1 Thông số BLE GATT Service & Characteristic
-- **Tên thiết bị quảng bá (Device Name)**: `XE_tsmart_BLE`
-- **Service UUID**: `0000ff01-0000-1000-8000-00805f9b34fb`
-- **Characteristic UUID**: `0000ff02-0000-1000-8000-00805f9b34fb`
-- **Properties**: `READ` | `WRITE` | `WRITE_NO_RESPONSE` | `NOTIFY`
-
-### 4.2 Bảng mã lệnh (App $\rightarrow$ ESP32-C3)
-Định dạng gói tin: `<SECRET_KEY>|<CMD>[|<PARAM1>|<PARAM2>]\n`
-
-| Mã Lệnh (`cmd`) | Tham số (`params`) | Hành vi hệ thống |
-| :--- | :--- | :--- |
-| `1` | Không | **Mở khóa xe**: Đóng Relay 1 (ACC ON), lưu flash, LED xanh lá, bíp 1 tiếng. |
-| `0` | Không | **Khóa xe**: Ngắt Relay 1 (ACC OFF), lưu flash, LED đỏ, bíp 2 tiếng. |
-| `2` | Không | **Đề xe**: Kích Relay 2 trong 1.5s (chỉ kích hoạt khi xe đang mở khóa). |
-| `3` | Không | **Tìm xe**: Kích Relay 3 (còi / đèn) trong 3.0s. |
-| `9` | `<NEW_KEY>` | **Đổi mã bảo mật**: Lưu mã mới vào Flash NVS `safe_key`. |
-| `FP_LIST` | Không | **Lấy danh sách vân tay**: ESP32 gửi danh sách ID và Tên qua các gói tin `FP_ITEM`. |
-| `FP_ENROLL` | `<TÊN_NGÓN>` | **Thêm vân tay mới**: Bắt đầu quy trình lấy mẫu 2 bước, lưu tên vào Flash NVS. |
-| `FP_DELETE` | `<ID>` | **Xóa vân tay**: Xóa template trong R503 và xóa tên trong Flash NVS. |
-| `FP_RENAME` | `<ID>\|<TÊN_MỚI>`| **Đổi tên vân tay**: Cập nhật tên gợi nhớ mới trong Flash NVS. |
-| `FP_CLEAR` | `CONFIRM` | **Xóa toàn bộ vân tay**: Xóa trắng bộ nhớ R503 và xóa database trong Flash NVS. |
-
-### 4.3 Bảng phản hồi trạng thái từ ESP32 gửi lên App (`FB|<STATUS>`)
-| Mã Trạng Thái | Ý nghĩa |
-| :--- | :--- |
-| `DA_MO_KHOA` | Xe đã mở khóa nguồn điện thành công |
-| `DA_KHOA_XE` | Xe đã khóa nguồn điện thành công |
-| `DA_DE_MAY` | Đã kích relay đề nổ máy |
-| `DA_TIM_XE` | Đang phát tín hiệu tìm xe |
-| `DA_DOI_KEY` | Đổi mã khóa bảo mật thành công |
-| `LOI_SAI_KEY` | Sai mã bảo mật |
-| `LOI_CHUA_MO_KHOA`| Xe chưa mở khóa điện mà yêu cầu đề |
-| `FP_LIST_START` | Bắt đầu truyền danh sách vân tay |
-| `FP_ITEM\|<ID>\|<NAME>` | Dữ liệu từng vân tay đã đăng ký |
-| `FP_LIST_END` | Hoàn tất truyền danh sách vân tay |
-| `FP_ENROLL_STEP_1\|<ID>` | Vui lòng đặt ngón tay lên cảm biến (Lần 1) |
-| `FP_ENROLL_STEP_2\|<ID>` | Nhấc ngón tay ra và đặt lại lần 2 |
-| `FP_ENROLL_OK\|<ID>\|<NAME>`| Thêm vân tay thành công |
-| `FP_ENROLL_FAILED\|<LÝ_DO>` | Thất bại (Timeout, mờ, không khớp) |
-| `FP_DELETE_OK\|<ID>` | Xóa vân tay thành công |
-| `FP_RENAME_OK\|<ID>\|<NAME>`| Đổi tên vân tay thành công |
-| `FP_CLEAR_OK` | Đã xóa toàn bộ vân tay |
-| `FP_MATCHED\|<ID>\|<NAME>` | Quẹt vân tay đúng $\rightarrow$ Đổi trạng thái Bật/Tắt xe thành công |
-| `FP_NOT_MATCH` | Cảnh báo: Quẹt vân tay không hợp lệ |
+### 11.3 Hướng dẫn biên dịch Ứng dụng Android & Wear OS
+1. **Yêu cầu môi trường**: Android Studio Ladybug / Koala, JDK 17 (JBR).
+2. **Biên dịch Debug APK ứng dụng điện thoại**:
+   ```powershell
+   cd "APP Controlesp"
+   $env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
+   .\gradlew.bat :app:assembleDebug
+   ```
+   *File APK đầu ra*: `APP Controlesp/app/build/outputs/apk/debug/app-debug.apk`.
+3. **Biên dịch APK đồng hồ thông minh Wear OS**:
+   ```powershell
+   .\gradlew.bat :wear:assembleDebug
+   ```
+   *File APK đầu ra*: `APP Controlesp/wear/build/outputs/apk/debug/wear-debug.apk`.
 
 ---
-
-## 5. ĐẶC TẢ FIRMWARE ESP32-C3 (`firmware/esp32 c3`)
-
-- **Cấu hình PlatformIO (`platformio.ini`)**:
-  - `board = esp32-c3-devkitm-1`
-  - `framework = arduino`
-  - `build_flags = -DARDUINO_USB_MODE=1 -DARDUINO_USB_CDC_ON_BOOT=1`
-  - `lib_deps = h2zero/NimBLE-Arduino, adafruit/Adafruit Fingerprint Sensor Library, Preferences`
-- **Mã nguồn chính (`src/main.cpp`)**:
-  - **Khởi tạo R503 an toàn**: Sử dụng `HardwareSerial r503Serial(1);` kết hợp ép kiểu `(Stream*)&r503Serial` vào `Adafruit_Fingerprint` để bảo vệ cấu hình chân GPIO 0 (RX) và GPIO 1 (TX).
-  - **Quét Baudrate tự phục hồi (Baud Auto-Scan)**: Thử nghiệm tuần tự qua `{57600, 9600, 115200, 19200, 38400}`, chèn `r503Serial.end(); delay(20);` khi chuyển đổi để giải phóng buffer FIFO UART, chống treo chip.
-  - **Quản lý BLE qua NimBLE**: Giữ mức phát sóng cực đại `ESP_PWR_LVL_P9`, xử lý kết nối, ngắt kết nối và cơ chế Fail-Safe khi mất kết nối.
-  - **Quản lý Flash NVS**: Sử dụng thư viện `Preferences` lưu trữ vĩnh viễn trạng thái khóa xe `is_unlocked`, mật khẩu bảo mật `master_key`, và danh bạ tên vân tay.
-  - **Kiểm tra biên dịch**: Đã biên dịch PlatformIO CLI thành công 100% (RAM: 7.4%, Flash: 42.5%, mã nhị phân `firmware.bin` sẵn sàng nạp).
-
----
-
-## 6. ĐẶC TẢ GIAO DIỆN CHÍNH THỨC: MẪU 1 (CYBER COMMAND - LUXURY GOLD EDITION)
-
-Thiết kế giao diện chính thức của hệ sinh thái TsmartKey được chuẩn hóa theo **Mẫu 1: Cyber Command Center** kết hợp bộ nhận diện **Luxury Gold & Obsidian**:
-
-### 6.1 Bảng Màu & Ngôn Ngữ Thiết Kế (Design System Tokens)
-- **Màu chủ đạo (Primary Gold)**: Vàng Champagne (`#d4af37`), Vàng Hổ Phách Thể Thao (`#f59e0b`), Ánh kim Gold Gradient (`linear-gradient(135deg, #ffd700, #b8860b)`).
-- **Mặt nền & Khối viền (Surfaces & Glassmorphism)**: Đen Thạch Anh Obsidian sâu (`#060608`), khung Titan cao cấp (`#161620`), viền ánh kim phản chiếu sang trọng (`rgba(212, 175, 55, 0.22)`).
-- **Haptic & Audio Feedback**: Phản hồi âm thanh điện tử tần số kép (440Hz - 1200Hz) mô phỏng tiếng còi, tiếng đề xe và xác nhận thao tác chuẩn xác.
-
-### 6.2 Chi Tiết 4 Tab Chức Năng Trên Điện Thoại
-1. **Tab 1: Điều khiển (Cockpit)**:
-   - **Nút tròn Hero Push-Start 3D Vàng Hoàng Gia 154px**: Nằm ở vị trí trọng tâm. Khi chạm kích hoạt nguồn ACC (Relay 1), vòng hào quang Neon bung tỏa hiệu ứng sóng ánh sáng Gold đa tầng rực rỡ.
-   - **Digital-Twin Xe Honda SH 150i**: Đèn pha LED vàng ấm tự động bật sáng khi kích hoạt nguồn, hiệu ứng rung cơ học và khói pô khi bấm nổ máy (Relay 2), còi nháy xi-nhan khi tìm xe.
-   - **Tính năng Đổi Tên Xe Linh Hoạt**: Chạm vào biểu tượng ✏️ để mở Modal cấu hình tên xe (`Honda SH 150i`, `Honda SH 350i`, `Air Blade 160`, `Yamaha NVX 155`, `Vespa GTS 300`, `Vario 160`, `Exciter 155`...) và biển số xe, đồng bộ tức thì trên toàn bộ app.
-2. **Tab 2: Tìm xe (Radar 360° & Finder)**:
-   - **Radar 360° cự ly thời gian thực**: Quét khoảng cách BLE RSSI theo các nấc 1.5m, 3.5m, 8.0m, 15m với điểm Blip phản hồi động.
-   - **Đèn Dẫn Đường 30s**: Giữ đèn pha sáng trong 30 giây khi đỗ xe trong hầm tối.
-   - **Ghim vị trí đỗ xe**: Lưu ghi chú hầm đỗ xe (VD: *Hầm B2 - Cột F08*).
-3. **Tab 3: Quản lý Vân tay (R503 Biometric Hub)**:
-   - **Mô phỏng cảm biến R503**: Vòng LED tròn Aura thở đa sắc, hiển thị logic chân WAKEUP (Active LOW: chạm = 0V, nghỉ = 3.2V) và tốc độ UART 57600 bps.
-   - **Nút ⚡ Quẹt thử trực tiếp**: Cho phép quẹt thử từng ngón tay ngay trên giao diện để kiểm tra tỷ lệ khớp 99.4% và tự kích hoạt mở xe.
-   - **Quy trình nạp 3 bước Failsafe**: Có tia quét Laser mô phỏng, nút hủy an toàn `FP_CANCEL`.
-4. **Tab 4: Cài đặt & Hồ sơ Garage (Garage Profile & Security)**:
-   - Thẻ hồ sơ phương tiện Garage Profile quản lý thông tin xe.
-   - **Chuẩn An Toàn Failsafe Ô Tô (Critical)**: Duy trì Relay 1 khi xe đang nổ máy di chuyển dù mất kết nối BLE hay điện thoại hết pin.
-   - Cấu hình bán kính nhận diện tự mở xe PKE (1.0m - 5.0m) và chia sẻ chìa khóa mượn xe tạm thời (Valet Key OTP 60 phút).
-
-- **Dịch vụ cầu nối ngầm (`WearMessageListenerService.kt`)**: Tự động nhận lệnh từ Smartwatch qua Google Wearable Data Layer và chuyển tiếp qua `BleManager`.
-
----
-
-## 7. ĐẶC TẢ ỨNG DỤNG ĐỒNG HỒ WEAR OS (`:wear`)
-
-- Phát triển bằng **Jetpack Compose for Wear OS**:
-  - Màn hình tròn toàn màn hình, nút chạm đổi màu theo trạng thái xe.
-  - Nhận diện cử chỉ **búng tay (Pinch)** bằng cảm biến gia tốc `Sensor.TYPE_LINEAR_ACCELERATION` (ngưỡng gia tốc $> 18\text{ m/s}^2$) để kích hoạt đề nổ máy từ đồng hồ.
-  - Tự động hủy đăng ký cảm biến sau 2 lần đề nổ để tiết kiệm pin và đảm bảo an toàn khi đang lái xe.
-
----
-
-## 8. HƯỚNG DẪN MỞ RỘNG & PHÁT TRIỂN TÍNH NĂNG MỚI
-
-1. **Tính năng Tự động mở khóa khi lại gần (Smart Proximity Unlock)**:
-   - Sử dụng hàm đo RSSI của BLE trong `BleManager.kt`. Khi RSSI > -65 dBm (khoảng cách 1-2m), tự động phát lệnh `1`. Khi RSSI < -85 dBm hoặc mất kết nối, tự động phát lệnh `0`.
-2. **Bảo mật nâng cao (HMAC / Rolling Code)**:
-   - Trong trường hợp muốn nâng cấp bảo mật chống bắt gói tin BLE, có thể tích hợp mã hóa thời gian thực (Timestamp + HMAC-SHA256) giữa Android App và ESP32-C3.
-
----
-
-## 9. KIẾN TRÚC AN TOÀN FAIL-SAFE & CƠ CHẾ XỬ LÝ SỰ CỐ THỰC TẾ
-
-### 9.1 Cơ chế Xử lý khi Xe đang chạy mà Điện thoại Mất kết nối (BLE Disconnect)
-> **Nguyên tắc sống còn**: Tuyệt đối không được ngắt nguồn ACC/Relay 1 khi xe đang lưu thông ngoài đường nhằm đảm bảo an toàn tính mạng người lái.
-
-```text
-[ XE ĐANG MỞ KHÓA (isUnlocked = true) ]
-                     │
-         Mất kết nối Bluetooth BLE!
-         (Hết pin / Rớt điện thoại)
-                     │
-                     ▼
-  ┌─────────────────────────────────────────────────────────┐
-  │  KHÔNG THAY ĐỔI TRẠNG THÁI RELAY 1 (GIỮ NGUYÊN NGUỒN)   │
-  │  Xe vẫn tiếp tục nổ máy chạy bình thường 100%!           │
-  └─────────────────────────────────────────────────────────┘
-                     │
-       Phát tín hiệu Cảnh báo cho tài xế:
-       - Còi bíp nhẹ 2 tiếng cảnh báo
-       - Đèn LED R503 nháy thở màu Tím/Vàng (Báo mất Bluetooth)
-                     │
-                     ▼
-         Khi tài xế dừng xe đến nơi:
-         - Chủ động chạm vân tay vào R503 để TẮT XE.
-         - Hoặc vặn chìa cơ về OFF.
-                     │
-                     ▼
-  ┌─────────────────────────────────────────────────────────┐
-  │  XE CHUYỂN SANG TRẠNG THÁI KHÓA HOÀN TOÀN (LOCKED)       │
-  │  Sau khi đã tắt, nếu không có vân tay hợp lệ hoặc        │
-  │  không có chìa cơ, kẻ gian KHÔNG THỂ đề nổ lại!          │
-  └─────────────────────────────────────────────────────────┘
-```
-
-### 9.2 Đa tầng dự phòng khi Điện thoại hết pin / Quên máy
-1. **Tầng 1 - Cảm biến vân tay R503**: Hoạt động hoàn toàn Offline và xử lý cục bộ trên ESP32. Chỉ cần chạm ngón tay là mở/khóa xe trong 0.5s mà không phụ thuộc bất kỳ thiết bị di động nào.
-2. **Tầng 2 - Ổ khóa cơ vật lý (Đấu song song)**: Tiếp điểm thường mở của Relay 1 đấu song song trực tiếp với 2 dây ổ khóa cơ. Khi vặn chìa khóa cơ zin, điện bình ắc quy nối tắt cấp thẳng cho dây ACC (100% Hardware Override), không phụ thuộc vào tình trạng hoạt động của vi điều khiển ESP32.
-3. **Tầng 3 - Module RF 433MHz Chỉ Dùng Tìm Xe (Locate-Only)**:
-   - Module thu RF kết nối trực tiếp vào `GPIO 7`.
-   - Bấm nút remote sẽ kích hoạt 3 nhịp chớp đèn xi-nhan và còi bíp ngắn.
-   - **Chính sách an ninh**: Tuyệt đối không mở khóa qua RF để triệt tiêu hoàn toàn nguy cơ bị sao chép mã sóng (Replay Attack) hoặc bị cấn nút trong túi quần.
-
----
-
-## 10. TỔNG HỢP KIỂM TOÁN VÀ CÁC ĐIỂM VÁ LOGIC ĐÃ HOÀN TẤT (AUDIT FIX LOG)
-
-| Kịch bản | Vị trí file | Điểm sai logic thực tế | Giải pháp đã khắc phục 100% |
-| :--- | :--- | :--- | :--- |
-| **KB 1 (Khóa bằng vân tay)** | [`MainActivity.kt`](file:///d:/Documents/PlatformIO/Tysmartkey/APP%20Controlesp/app/src/main/java/com/example/control_esp/MainActivity.kt) | Nhận `FP_MATCHED|` khi xe đang bật bị ghi sai là "Mở khóa xe" | Kiểm tra biến `isOn`: Nếu `isOn == true` $\rightarrow$ *"Mở khóa bằng vân tay"*, nếu `isOn == false` $\rightarrow$ *"Khóa xe bằng vân tay"*. |
-| **KB 2 (Chết vòng reconnect)** | [`MainActivity.kt`](file:///d:/Documents/PlatformIO/Tysmartkey/APP%20Controlesp/app/src/main/java/com/example/control_esp/MainActivity.kt) | Xe ngoài vùng sóng lần đầu fail $\rightarrow$ ngắt cơ chế reconnect vĩnh viễn | Trong `updateConnectionUI(false)`, nếu `isAutoConnectEnabled && !isManualDisconnect` $\rightarrow$ tự động lên lịch thử lại sau 4s. |
-| **KB 3 (Đề xe ma/ảo)** | [`MainActivity.kt`](file:///d:/Documents/PlatformIO/Tysmartkey/APP%20Controlesp/app/src/main/java/com/example/control_esp/MainActivity.kt) | Bấm nút mở xe tự hẹn giờ 3s đề nổ dù xe chưa bật điện ACC | Loại bỏ hẹn giờ mù quáng ở `btnToggle`. **CHỈ** kích hoạt bộ đếm đề nổ khi xe gửi phản hồi `DA_MO_KHOA` về (`wasOff == true`). |
-| **KB 4 (Khóa key rỗng)** | [`BleManager.kt`](file:///d:/Documents/PlatformIO/Tysmartkey/APP%20Controlesp/app/src/main/java/com/example/control_esp/BleManager.kt) & [`MainActivity.kt`](file:///d:/Documents/PlatformIO/Tysmartkey/APP%20Controlesp/app/src/main/java/com/example/control_esp/MainActivity.kt) | Cài đặt app lần đầu `SECRET_KEY` rỗng gửi `NO_KEY|` khiến ESP32 từ chối | Đặt fallback mặc định của SharedPreferences và biến `SECRET_KEY = "271000"`. |
-| **KB 5 (Wear OS ngầm)** | [`WearMessageListenerService.kt`](file:///d:/Documents/PlatformIO/Tysmartkey/APP%20Controlesp/app/src/main/java/com/example/control_esp/WearMessageListenerService.kt) | Chạy ngầm đọc `IS_BLE` mặc định là `false` cố kết nối Classic BT | Đặt `IS_BLE` mặc định là `true` và `secretKey = "271000"`, gửi trực tiếp qua BLE 5.0. |
-| **KB 6 (Tràn lịch sử ảo)** | [`MainActivity.kt`](file:///d:/Documents/PlatformIO/Tysmartkey/APP%20Controlesp/app/src/main/java/com/example/control_esp/MainActivity.kt) | Xe chập chờn BLE reconnect gửi `DA_MO_KHOA` ghi thêm nhiều dòng mở khóa | Kiểm tra `val wasOff = !isOn`. Chỉ ghi lịch sử khi xe chuyển trạng thái từ TẮT $\rightarrow$ MỞ. |
-| **KB 7 (Dội vòng lặp Switch)** | [`MainActivity.kt`](file:///d:/Documents/PlatformIO/Tysmartkey/APP%20Controlesp/app/src/main/java/com/example/control_esp/MainActivity.kt) | Bật Switch Tab 1 kích hoạt Tab 2 và dội ngược lại gây lặp `saveSettings()` | Bổ sung điều kiện kiểm tra `if (cbOther?.isChecked != isChecked)` trước khi gán. |
-| **KB 8 (Hồ sơ Garage xe)** | [`MainActivity.kt`](file:///d:/Documents/PlatformIO/Tysmartkey/APP%20Controlesp/app/src/main/java/com/example/control_esp/MainActivity.kt) | Tên xe chỉ hiển thị tên BLE mặc định, chưa có hồ sơ Garage cá nhân | Thêm SharedPreferences `"VEHICLE_NAME"` (mặc định `"Honda SH 150i"`), cho phép bấm vào Header để đổi tên gợi nhớ xe. |
-| **Bổ sung (Chuẩn Honda SH)** | [`main.cpp`](file:///d:/Documents/PlatformIO/Tysmartkey/firmware/esp32%20c3/src/main.cpp) | Relay 3 (Còi/Đèn) tự kích hoạt gây hú còi và nháy đèn khi bật tắt xe | **Phương Án 1 (Silent ACC):** Loại bỏ hoàn toàn `beep()` trong `setVehicleUnlock()` và `setup()`. Bật/Tắt xe êm ái qua Relay 1 (ACC) và vòng LED R503. Relay 3 **CHỈ DÀNH RIÊNG CHO:** (1) Tìm xe trên App/Remote RF (`triggerLocate()`); (2) Quẹt sai vân tay 3 lần liên tiếp (`beep(6, 120)` - Báo động chống trộm). |
-
+> **Bản quyền dự án**: Tsmartkey Ecosystem - Tài liệu kỹ thuật chuẩn xác tuyệt đối được tổng hợp tự động từ hiện trạng mã nguồn thực tế.

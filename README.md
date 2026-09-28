@@ -82,16 +82,18 @@ Dự án sử dụng bo mạch **ESP32-C3 SuperMini** (vi kiến trúc RISC-V 32
 
 | Chân ESP32-C3 | Chế độ | Thiết bị ngoại vi kết nối | Mô tả chức năng kỹ thuật |
 | :---: | :---: | :--- | :--- |
+| **`GPIO 6`** | `Output` | **Relay 1 (Khóa điện ACC)** | Đóng/cắt nguồn điện chính ổ khóa xe (Đấu song song tiếp điểm cơ) |
+| **`GPIO 7`** | `Output` | **Relay 2 (Kích đề Starter)** | Kích nút đề xe trong 1.5s khi ra lệnh từ App/Watch |
+| **`GPIO 10`** | `Output` | **Relay 3 (Còi & Xi-nhan)** | Phát chuỗi âm thanh bíp và nháy đèn khi tìm xe / báo động |
+| **`GPIO 3`** | `Input Pullup (RTC)` | **Dây XANH DƯƠNG (WAKEUP) R503** | Tín hiệu ngắt cảm ứng chạm (Active LOW: không chạm = 3.2V, có chạm = 0V) |
+| **`GPIO 4`** | `Input Pulldown (RTC)` | **Cảm biến rung SW-420 (DO)** | Giám sát rung lắc chống trộm xe (Active HIGH khi rung, có toggle trên App) |
+| **`GPIO 5`** | `Input Pulldown (RTC)`| **Module RF 433MHz (Chân VT)** | Nhận tín hiệu tìm xe Remote RF 433MHz (Active HIGH: Bấm remote = 3.3V) |
+| **`GPIO 2`** | `Input ADC (ADC1_CH2)`| **Đo điện áp ắc quy (Battery ADC)**| Cầu phân áp 1k - 10k (Tỷ lệ 1/11, đo an toàn dải 0 - 27.5V) |
 | **`GPIO 0`** | `UART1 RX` | **Dây VÀNG (TXD)** của R503 | Nhận gói tin dữ liệu hình ảnh, phản hồi ACK từ cảm biến |
 | **`GPIO 1`** | `UART1 TX` | **Dây XANH LÁ (RXD)** của R503 | Truyền lệnh điều khiển Opcode (0x01, 0x35, 0x04...) sang R503 |
-| **`GPIO 3`** | `Input Pullup` | **Dây XANH DƯƠNG (WAKEUP)** của R503 | Tín hiệu ngắt cảm ứng chạm (Active LOW: không chạm = 3.2V, có chạm = 0V) |
-| **`GPIO 4`** | `Output` | **Relay 1 (Khóa điện ACC)** | Đóng/cắt nguồn điện chính ổ khóa xe (Mở máy / Tắt máy) |
-| **`GPIO 5`** | `Output` | **Relay 2 (Đề nổ Start)** | Kích rơ-le đề xe trong 800ms khi ra lệnh từ App/Watch |
-| **`GPIO 6`** | `Output` | **Relay 3 (Còi & Xi-nhan)** | Phát chuỗi âm thanh bíp và nháy đèn khi tìm xe / báo động |
-| **`GPIO 7`** | `Input Pulldown` | **Chân VT / D0 của Module RF 433** | Nhận tín hiệu bấm Remote tìm xe (Chỉ tìm xe, không mở khóa) |
-| **`GPIO 2`** | `Input Pullup` | Dự phòng ngắt WAKEUP | Giữ điện trở kéo cao nội bộ chống kích hoạt nhầm |
-| **`3.3V`** | `Nguồn OUT` | **Dây ĐỎ (VCC)** & **Dây TRẮNG (Touch)** | Cấp nguồn nuôi vi xử lý quang học và mạch cảm ứng R503 |
-| **`GND`** | `Nối đất` | **Dây ĐEN (GND)** của R503 & Relay | Nối mass chung toàn bộ hệ thống xe |
+| **`GPIO 8`** | `Output` | **LED Xanh Onboard SuperMini** | Đèn LED trạng thái trên bo mạch (Active LOW) |
+| **`3.3V`** | `Nguồn OUT` | **VCC R503, RF, SW-420, Cảm ứng** | Cấp nguồn nuôi vi xử lý quang học và các cảm biến |
+| **`GND`** | `Nối đất` | **GND chung toàn hệ thống** | Nối mass chung toàn bộ hệ thống xe |
 
 > [!IMPORTANT]
 > **Quy tắc phân chia UART trên ESP32-C3**:  

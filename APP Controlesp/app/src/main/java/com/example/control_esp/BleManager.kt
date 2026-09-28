@@ -23,6 +23,7 @@ object BleManager {
     // UUIDs tương ứng với Firmware ESP32-C3 NimBLE
     val SERVICE_UUID: UUID = UUID.fromString("0000ff01-0000-1000-8000-00805f9b34fb")
     val CHARACTERISTIC_UUID: UUID = UUID.fromString("0000ff02-0000-1000-8000-00805f9b34fb")
+    val OTA_DATA_UUID: UUID = UUID.fromString("0000ff03-0000-1000-8000-00805f9b34fb")
     private val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
     private var bluetoothAdapter: BluetoothAdapter? = null
@@ -368,4 +369,26 @@ object BleManager {
             true
         }
     }
+
+    fun writeOtaChunk(bytes: ByteArray): Boolean {
+        val mac = activeMac ?: return false
+        val gatt = gattMap[mac] ?: return false
+        val service = gatt.getService(SERVICE_UUID) ?: return false
+        val char = service.getCharacteristic(OTA_DATA_UUID) ?: return false
+
+        val writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val status = gatt.writeCharacteristic(char, bytes, writeType)
+            status == BluetoothStatusCodes.SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            char.value = bytes
+            @Suppress("DEPRECATION")
+            char.writeType = writeType
+            @Suppress("DEPRECATION")
+            gatt.writeCharacteristic(char)
+        }
+    }
 }
+

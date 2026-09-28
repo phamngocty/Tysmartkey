@@ -4,17 +4,19 @@
 #include <Adafruit_Fingerprint.h>
 #include <mbedtls/base64.h>
 #include <esp_sleep.h>
+#include <Update.h>
 
 // ==========================================
 // 📌 1. ĐỊNH NGHĨA CHÂN PHẦN CỨNG (ESP32-C3)
 // ==========================================
-#define RELAY1_PIN         6  // Relay 1: Khóa điện ACC (Đấu song song ổ khóa cơ)
-#define RELAY2_PIN         7  // Relay 2: Đề xe (Starter)
-#define RELAY3_PIN         10 // Relay 3: Đèn / Còi (Buzzer / Horn / Turn lights)
+#define RELAY1_PIN         6  // Relay 1: Khóa điện ACC (Đấu song song ổ khóa cơ, Active HIGH)
+#define RELAY2_PIN         7  // Relay 2: Đề xe (Starter, Active LOW: Kích hoạt = 0V/LOW, Tắt = 3.3V/HIGH)
+#define RELAY3_PIN         10 // Relay 3: Đèn / Còi (Buzzer / Horn, Active LOW: Kích hoạt = 0V/LOW, Tắt = 3.3V/HIGH)
 
-#define R503_WAKE_PIN      2  // GPIO 2: WAKEUP cảm ứng chạm R503 (RTC Wakeup, Active LOW: chạm = 0V)
-#define SW420_VIBRATE_PIN  3  // GPIO 3: Cảm biến rung SW-420 (RTC Wakeup, Active LOW khi rung)
-#define RF_LOCATE_PIN      4  // GPIO 4: Module RF 433MHz VT qua transistor đảo (RTC Wakeup, Active LOW)
+#define R503_WAKE_PIN      3  // GPIO 3: WAKEUP cảm ứng chạm R503 (RTC Wakeup, Active LOW: chạm = 0V - Sạch 100%, không bị kẹt Bootloader)
+#define SW420_VIBRATE_PIN  4  // GPIO 4: Cảm biến rung SW-420 (RTC Wakeup, Active HIGH khi rung)
+#define RF_LOCATE_PIN      5  // GPIO 5: Module RF 433MHz Chân VT (RTC Wakeup, Active HIGH khi bấm Remote)
+#define BATTERY_ADC_PIN    2  // GPIO 2: ADC1_CH2 đo điện áp bình ắc quy qua cầu phân áp 1k - 10k (Tỷ lệ 1/11)
 
 #define R503_RX_PIN        0  // GPIO 0 kết nối TXD (dây Vàng) của R503
 #define R503_TX_PIN        1  // GPIO 1 kết nối RXD (dây Xanh lá) của R503
@@ -27,14 +29,23 @@
 #define DEVICE_NAME         "XE_tsmart_BLE"
 #define SERVICE_UUID        "0000ff01-0000-1000-8000-00805f9b34fb"
 #define CHARACTERISTIC_UUID "0000ff02-0000-1000-8000-00805f9b34fb"
+#define OTA_DATA_UUID       "0000ff03-0000-1000-8000-00805f9b34fb"
 
 String SECRET_KEY = "271000"; // Mã bảo mật mặc định
 bool isUnlocked = false;       // Trạng thái xe (true: Đang mở khóa, false: Đang khóa)
+bool antiTheftEnabled = false; // Trạng thái tính năng Báo động chống dắt rung lắc (SW-420)
 volatile bool isEnrolling = false;          // Cờ đang trong chế độ thêm vân tay
 volatile bool cancelEnrollRequested = false; // Cờ yêu cầu hủy tiến trình lấy vân tay
 TaskHandle_t enrollTaskHandle = nullptr;    // Con trỏ FreeRTOS Task thêm vân tay
 volatile bool isCapturingImage = false;     // Cờ đang trong chế độ chụp ảnh thực tế
 TaskHandle_t captureImageTaskHandle = nullptr; // Con trỏ FreeRTOS Task chụp ảnh
+
+// Biến trạng thái cập nhật Firmware OTA qua BLE
+volatile bool isOtaUpdating = false;
+size_t otaTotalBytes = 0;
+size_t otaWrittenBytes = 0;
+unsigned long otaLastChunkTime = 0;
+NimBLECharacteristic *pOtaDataCharacteristic = nullptr;
 
 // Khởi tạo Preferences lưu trữ Flash NVS
 Preferences prefsSecurity; // namespace "safe_key"
@@ -123,12 +134,12 @@ void triggerLocate();
 // 🔔 3. HÀM PHẢN HỒI & HIỆU ỨNG (FEEDBACK)
 // ==========================================
 
-// Kêu còi / nháy đèn bíp phản hồi
+// Kêu còi / nháy đèn bíp phản hồi (RELAY3_PIN: Active LOW)
 void beep(int count, int delayMs = 100) {
     for (int i = 0; i < count; i++) {
-        digitalWrite(RELAY3_PIN, HIGH);
+        digitalWrite(RELAY3_PIN, LOW);  // Active LOW: Bật còi/đèn
         delay(delayMs);
-        digitalWrite(RELAY3_PIN, LOW);
+        digitalWrite(RELAY3_PIN, HIGH); // Tắt còi/đèn
         if (i < count - 1) delay(80);
     }
 }
@@ -146,10 +157,24 @@ void notifyStatus(String msg) {
     }
 }
 
+// Đọc điện áp bình ắc quy qua cầu phân áp 1k - 10k trên chân GPIO 2 (ADC1_CH2)
+// Cầu phân áp: R1 = 10k (nối V_BAT), R2 = 1k (nối GND) -> Hệ số nhân = (10k + 1k) / 1k = 11.0
+float readBatteryVoltage() {
+    uint32_t sumMv = 0;
+    const int SAMPLES = 16;
+    for (int i = 0; i < SAMPLES; i++) {
+        sumMv += analogReadMilliVolts(BATTERY_ADC_PIN);
+        delay(1);
+    }
+    float avgMv = (float)sumMv / (float)SAMPLES;
+    float voltage = (avgMv * 11.0f) / 1000.0f; // Chuyển sang Volt và nhân hệ số phân áp 11.0
+    return voltage;
+}
+
 // Gửi dữ liệu Telemetry thời gian thực (Điện áp ắc quy, Nhiệt độ chip ESP32-C3, Trạng thái khóa)
 void sendTelemetry() {
-    float tempC = temperatureRead(); // Đọc cảm biến nhiệt độ tích hợp trong chip ESP32-C3
-    float voltage = 12.6;            // Điện áp chuẩn ắc quy (hoặc từ chân chia áp ADC)
+    float tempC = temperatureRead();    // Đọc cảm biến nhiệt độ tích hợp trong chip ESP32-C3
+    float voltage = readBatteryVoltage(); // Đo điện áp bình thực tế từ chân GPIO 2 (Cầu phân áp 1k - 10k)
     
     // Gói tin: FB|TELE|<VOLTAGE>|<TEMP_C>|<IS_UNLOCKED>
     String teleMsg = "TELE|" + String(voltage, 1) + "|" + String(tempC, 1) + "|" + (isUnlocked ? "1" : "0");
@@ -688,7 +713,7 @@ void setVehicleUnlock(bool unlock, bool saveFlash = true, bool notify = true) {
     }
 }
 
-// Đề xe (chỉ khi xe đang mở khóa)
+// Đề xe (chỉ khi xe đang mở khóa, RELAY2_PIN: Active LOW)
 void triggerStarter() {
     lastActivityTime = millis();
     if (!isUnlocked) {
@@ -696,21 +721,21 @@ void triggerStarter() {
         beep(3, 60);
         return;
     }
-    digitalWrite(RELAY2_PIN, HIGH);
+    digitalWrite(RELAY2_PIN, LOW);  // Active LOW: Kích hoạt đề nổ máy
     delay(1500);
-    digitalWrite(RELAY2_PIN, LOW);
+    digitalWrite(RELAY2_PIN, HIGH); // Tắt đề
     notifyStatus("DA_DE_MAY");
 }
 
-// Tìm xe: Nháy xi-nhan + còi 3 nhịp ngắn chuẩn xe cao cấp
+// Tìm xe: Nháy xi-nhan + còi 3 nhịp ngắn chuẩn xe cao cấp (RELAY3_PIN: Active LOW)
 void triggerLocate() {
     lastActivityTime = millis();
     Serial.println("Đang phát tín hiệu tìm xe (3 nhịp bíp & nháy đèn)...");
     for (int i = 0; i < 3; i++) {
-        digitalWrite(RELAY3_PIN, HIGH);
+        digitalWrite(RELAY3_PIN, LOW);  // Active LOW: Bật còi/đèn
         digitalWrite(ONBOARD_LED_PIN, LOW);
         delay(200);
-        digitalWrite(RELAY3_PIN, LOW);
+        digitalWrite(RELAY3_PIN, HIGH); // Tắt còi/đèn
         digitalWrite(ONBOARD_LED_PIN, HIGH);
         if (i < 2) delay(150);
     }
@@ -758,12 +783,12 @@ void handleVibrationDetected() {
     Serial.println("🚨 [ALARM] Cảm biến rung SW-420 phát hiện rung lắc khi xe đang khóa!");
     notifyStatus("CANH_BAO_RUNG");
     
-    // Báo động nhẹ 3 nhịp còi / xi-nhan cảnh báo kẻ gian
+    // Báo động nhẹ 3 nhịp còi / xi-nhan cảnh báo kẻ gian (RELAY3_PIN: Active LOW)
     for (int i = 0; i < 3; i++) {
-        digitalWrite(RELAY3_PIN, HIGH);
+        digitalWrite(RELAY3_PIN, LOW);  // Active LOW: Bật còi/đèn
         digitalWrite(ONBOARD_LED_PIN, LOW); // Bật LED xanh onboard
         delay(70);
-        digitalWrite(RELAY3_PIN, LOW);
+        digitalWrite(RELAY3_PIN, HIGH); // Tắt còi/đèn
         digitalWrite(ONBOARD_LED_PIN, HIGH); // Tắt LED xanh onboard
         if (i < 2) delay(80);
     }
@@ -783,8 +808,8 @@ void enterTier2DeepSleep() {
     
     // 2. Đảm bảo trạng thái Relay an toàn và tắt LED Onboard
     digitalWrite(RELAY1_PIN, isUnlocked ? HIGH : LOW);
-    digitalWrite(RELAY2_PIN, LOW);
-    digitalWrite(RELAY3_PIN, LOW);
+    digitalWrite(RELAY2_PIN, HIGH); // Active LOW: HIGH = TẮT
+    digitalWrite(RELAY3_PIN, HIGH); // Active LOW: HIGH = TẮT
     digitalWrite(ONBOARD_LED_PIN, HIGH); // Active LOW: HIGH = TẮT
     
     // 3. Tắt hoàn toàn khối BLE
@@ -793,14 +818,27 @@ void enterTier2DeepSleep() {
     }
     NimBLEDevice::deinit(true);
     
-    // 4. Kích hoạt RTC GPIO Wakeup trên cả 3 chân cứng (Active LOW)
-    uint64_t wakeMask = (1ULL << R503_WAKE_PIN) | (1ULL << SW420_VIBRATE_PIN) | (1ULL << RF_LOCATE_PIN);
-    esp_deep_sleep_enable_gpio_wakeup(wakeMask, ESP_GPIO_WAKEUP_GPIO_LOW);
+    // 4. Kích hoạt RTC GPIO Wakeup:
+    // - GPIO 3 (R503 Touch WAKE): Active LOW
+    // - GPIO 4 (SW-420 Rung): Active HIGH (chỉ kích hoạt nếu antiTheftEnabled == true)
+    // - GPIO 5 (Remote RF 433MHz Chân VT): Active HIGH
+    uint64_t lowWakeMask = (1ULL << R503_WAKE_PIN);
+    esp_deep_sleep_enable_gpio_wakeup(lowWakeMask, ESP_GPIO_WAKEUP_GPIO_LOW);
+
+    uint64_t highWakeMask = (1ULL << RF_LOCATE_PIN);
+    if (antiTheftEnabled) {
+        highWakeMask |= (1ULL << SW420_VIBRATE_PIN);
+    }
+    esp_deep_sleep_enable_gpio_wakeup(highWakeMask, ESP_GPIO_WAKEUP_GPIO_HIGH);
     
     Serial.printf("🔒 [POWER] Đã thiết lập ngắt RTC Wakeup trên:\n");
     Serial.printf("   - GPIO %d: Chạm vân tay R503 (Active LOW)\n", R503_WAKE_PIN);
-    Serial.printf("   - GPIO %d: Cảm biến rung SW-420 (Active LOW)\n", SW420_VIBRATE_PIN);
-    Serial.printf("   - GPIO %d: Remote RF 433MHz qua Transistor đảo (Active LOW)\n", RF_LOCATE_PIN);
+    if (antiTheftEnabled) {
+        Serial.printf("   - GPIO %d: Cảm biến rung SW-420 (Active HIGH)\n", SW420_VIBRATE_PIN);
+    } else {
+        Serial.printf("   - GPIO %d: Cảm biến rung SW-420 (ĐÃ TẮT BẢO VỆ CHỐNG DẮT)\n", SW420_VIBRATE_PIN);
+    }
+    Serial.printf("   - GPIO %d: Remote RF 433MHz Chân VT (Active HIGH)\n", RF_LOCATE_PIN);
     Serial.println("💤 [POWER] ESP32-C3 bắt đầu ngủ sâu (Dòng ăn bình ~1.2mA). Tạm biệt!");
     Serial.flush();
     
@@ -1879,7 +1917,17 @@ void processIncomingCommand(String data) {
     String params = (secondPipe == -1) ? "" : remaining.substring(secondPipe + 1);
 
     // --- CÁC LỆNH CƠ BẢN ---
-    if (cmd == "1") {
+    if (cmd == "SET_ALARM") {
+        antiTheftEnabled = (params.toInt() == 1);
+        prefsSecurity.putBool("anti_theft", antiTheftEnabled);
+        Serial.printf("🛡️ [ALARM] Đã chuyển đổi Báo động Chống dắt: %s\n", antiTheftEnabled ? "BẬT" : "TẮT");
+        notifyStatus("ALARM_STATUS|" + String(antiTheftEnabled ? "1" : "0"));
+        beep(1, antiTheftEnabled ? 100 : 50);
+    }
+    else if (cmd == "GET_ALARM") {
+        notifyStatus("ALARM_STATUS|" + String(antiTheftEnabled ? "1" : "0"));
+    }
+    else if (cmd == "1") {
         setVehicleUnlock(true);
     }
     else if (cmd == "0") {
@@ -2125,6 +2173,82 @@ void processIncomingCommand(String data) {
         notifyStatus(isUnlocked ? "STATUS|1" : "STATUS|0");
         sendTelemetry();
     }
+
+    // --- LỆNH NÂNG CẤP FIRMWARE TỪ XA QUA BLE (BLE OTA) ---
+    else if (cmd == "OTA_BEGIN") {
+        if (isUnlocked) {
+            Serial.println("❌ [OTA] Bị từ chối: Xe đang mở khóa ACC!");
+            notifyStatus("OTA_ERR_VEHICLE_ON");
+            return;
+        }
+        if (isEnrolling || isCapturingImage) {
+            Serial.println("❌ [OTA] Bị từ chối: Đang thêm vân tay hoặc chụp ảnh!");
+            notifyStatus("OTA_ERR_BUSY");
+            return;
+        }
+
+        int pipeIdx = params.indexOf('|');
+        size_t size = (pipeIdx != -1 ? params.substring(0, pipeIdx) : params).toInt();
+        String md5 = (pipeIdx != -1) ? params.substring(pipeIdx + 1) : "";
+        md5.trim();
+
+        if (size == 0 || size > 1966080) { // Tối đa kích thước phân vùng ota_1 (1.875 MB)
+            Serial.printf("❌ [OTA] Kích thước file không hợp lệ: %u bytes\n", (unsigned int)size);
+            notifyStatus("OTA_ERR_INVALID_SIZE");
+            return;
+        }
+
+        if (!Update.begin(size, U_FLASH)) {
+            Serial.printf("❌ [OTA] Update.begin failed! Lỗi: %u\n", Update.getError());
+            notifyStatus("OTA_ERR_BEGIN");
+            return;
+        }
+
+        if (md5.length() == 32) {
+            Update.setMD5(md5.c_str());
+            Serial.printf("🔐 [OTA] Expected MD5: %s\n", md5.c_str());
+        }
+
+        isOtaUpdating = true;
+        otaTotalBytes = size;
+        otaWrittenBytes = 0;
+        otaLastChunkTime = millis();
+        Serial.printf("🚀 [OTA] Sẵn sàng nhận firmware: %u bytes\n", (unsigned int)size);
+        notifyStatus("OTA_READY");
+    }
+    else if (cmd == "OTA_END") {
+        if (!isOtaUpdating) {
+            notifyStatus("OTA_ERR_NOT_RUNNING");
+            return;
+        }
+        Serial.printf("🏁 [OTA] Kết thúc nạp dữ liệu. Đã nhận: %u / %u bytes. Đang xác thực...\n",
+                      (unsigned int)otaWrittenBytes, (unsigned int)otaTotalBytes);
+        if (Update.end(true)) {
+            if (Update.isFinished()) {
+                Serial.println("🎉 [OTA] Nâng cấp thành công 100%! Đang khởi động lại hệ thống...");
+                notifyStatus("OTA_SUCCESS");
+                isOtaUpdating = false;
+                delay(1000);
+                esp_restart();
+            } else {
+                Serial.println("❌ [OTA] Firmware chưa hoàn tất!");
+                notifyStatus("OTA_ERR_UNFINISHED");
+                isOtaUpdating = false;
+            }
+        } else {
+            Serial.printf("❌ [OTA] Xác thực thất bại! Mã lỗi: %u\n", Update.getError());
+            notifyStatus("OTA_ERR_VERIFY");
+            isOtaUpdating = false;
+        }
+    }
+    else if (cmd == "OTA_ABORT") {
+        if (isOtaUpdating) {
+            Update.abort();
+            isOtaUpdating = false;
+            Serial.println("⚠️ [OTA] Đã hủy tiến trình cập nhật theo yêu cầu!");
+            notifyStatus("OTA_ABORTED");
+        }
+    }
 }
 
 // ==========================================
@@ -2141,6 +2265,8 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         pendingIdleLedUpdate = true;
         notifyStatus(isUnlocked ? "STATUS|1" : "STATUS|0");
         sendTelemetry();
+        delay(40);
+        notifyStatus("ALARM_STATUS|" + String(antiTheftEnabled ? "1" : "0"));
         delay(40);
         sendRainConfig();
         delay(40);
@@ -2209,6 +2335,12 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             updateIdleLed();
         }
 
+        if (isOtaUpdating) {
+            Serial.println("⚠️ [OTA] Mất kết nối BLE khi đang nạp firmware! Hủy OTA an toàn.");
+            Update.abort();
+            isOtaUpdating = false;
+        }
+
         Serial.println("Bắt đầu Advertising lại...");
         updateBleAdvertisingMode(isUnlocked);
     }
@@ -2220,6 +2352,27 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
         if (value.length() > 0) {
             processIncomingCommand(String(value.c_str()));
         }
+    }
+};
+
+class OtaDataCallbacks : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic *pChar) {
+        if (!isOtaUpdating) return;
+        std::string val = pChar->getValue();
+        size_t len = val.length();
+        if (len == 0) return;
+
+        size_t written = Update.write((uint8_t*)val.data(), len);
+        if (written != len) {
+            Serial.printf("❌ [OTA] Write failed! Expected %u, wrote %u\n", (unsigned int)len, (unsigned int)written);
+            isOtaUpdating = false;
+            Update.abort();
+            notifyStatus("OTA_ERR_WRITE");
+            return;
+        }
+        otaWrittenBytes += written;
+        otaLastChunkTime = millis();
+        lastActivityTime = millis();
     }
 };
 
@@ -2259,16 +2412,22 @@ void setup() {
 
     // 1. Khởi tạo Relay Pins & Chân Ngoại vi
     pinMode(RELAY1_PIN, OUTPUT);
+    digitalWrite(RELAY2_PIN, HIGH); // Active-LOW: Kéo HIGH trước khi set OUTPUT để chống giật xung đóng relay khi khởi động
     pinMode(RELAY2_PIN, OUTPUT);
+    digitalWrite(RELAY3_PIN, HIGH); // Active-LOW: Kéo HIGH trước khi set OUTPUT để chống giật xung đóng relay khi khởi động
     pinMode(RELAY3_PIN, OUTPUT);
     pinMode(ONBOARD_LED_PIN, OUTPUT);
     digitalWrite(ONBOARD_LED_PIN, HIGH); // Active LOW: Tắt LED xanh Onboard
 
-    // Cấu hình chân tín hiệu Module RF 433MHz (Active LOW qua transistor đảo)
-    pinMode(RF_LOCATE_PIN, INPUT_PULLUP);
+    // Cấu hình chân đo điện áp ắc quy ADC (GPIO 2 - ADC1_CH2, Cầu phân áp 1k - 10k)
+    pinMode(BATTERY_ADC_PIN, INPUT);
+    analogSetAttenuation(ADC_11db); // Dải đo điện áp ADC tối ưu lên đến ~2.6V - 3.1V
 
-    // Cấu hình cảm biến rung SW-420 (Active LOW khi rung)
-    pinMode(SW420_VIBRATE_PIN, INPUT_PULLUP);
+    // Cấu hình chân tín hiệu Module RF 433MHz (Chân VT Active HIGH: Nhấn remote = 3.3V)
+    pinMode(RF_LOCATE_PIN, INPUT_PULLDOWN);
+
+    // Cấu hình cảm biến rung SW-420 (Active HIGH khi rung: Bình thường = 0V, Rung = 3.3V)
+    pinMode(SW420_VIBRATE_PIN, INPUT_PULLDOWN);
 
     // Cấu hình chân cảm ứng ngắt WAKEUP của R503 (Active LOW: Không chạm = 3.2V, Chạm = 0V)
     pinMode(R503_WAKE_PIN, INPUT_PULLUP);
@@ -2281,6 +2440,8 @@ void setup() {
 
     SECRET_KEY = prefsSecurity.getString("master_key", "271000");
     isUnlocked = prefsSecurity.getBool("is_unlocked", false);
+    antiTheftEnabled = prefsSecurity.getBool("anti_theft", false);
+    Serial.printf("🛡️ Chống dắt (Anti-Theft): %s (GPIO 4 Active HIGH)\n", antiTheftEnabled ? "BẬT" : "TẮT");
 
     rainEnabled = prefsRain.getBool("enabled", false);
     touchHoldMs = prefsRain.getInt("touch_hold", 500);
@@ -2304,8 +2465,8 @@ void setup() {
 
     // KHÔI PHỤC NGAY LẬP TỨC TRẠNG THÁI RELAY KHI KHỞI ĐỘNG (FAIL-SAFE)
     digitalWrite(RELAY1_PIN, isUnlocked ? HIGH : LOW);
-    digitalWrite(RELAY2_PIN, LOW);
-    digitalWrite(RELAY3_PIN, LOW);
+    digitalWrite(RELAY2_PIN, HIGH); // Active-LOW: TẮT đề (HIGH = TẮT)
+    digitalWrite(RELAY3_PIN, HIGH); // Active-LOW: TẮT còi/đèn (HIGH = TẮT)
 
     Serial.printf("Secret Key: %s | Trạng thái xe: %s\n", 
                   SECRET_KEY.c_str(), isUnlocked ? "MỞ KHÓA" : "ĐANG KHÓA");
@@ -2385,6 +2546,15 @@ void setup() {
     );
     pCharacteristic->setCallbacks(new CharacteristicCallbacks());
 
+    pOtaDataCharacteristic = pService->createCharacteristic(
+        OTA_DATA_UUID,
+        NIMBLE_PROPERTY::WRITE | 
+        NIMBLE_PROPERTY::WRITE_NR | 
+        NIMBLE_PROPERTY::WRITE_ENC | 
+        NIMBLE_PROPERTY::WRITE_AUTHEN
+    );
+    pOtaDataCharacteristic->setCallbacks(new OtaDataCallbacks());
+
     pService->start();
 
     NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
@@ -2427,6 +2597,18 @@ void setup() {
 }
 
 void loop() {
+    // 🛡️ XỬ LÝ TIẾN TRÌNH BLE OTA (CHỐNG TREO & KHÓA CHỨC NĂNG NGOẠI VI KHI ĐANG NẠP FIRMWARE)
+    if (isOtaUpdating) {
+        if (millis() - otaLastChunkTime > 15000) { // 15 giây không nhận thêm gói tin
+            Serial.println("⚠️ [OTA] Quá thời gian chờ gói tin (15s Timeout)! Hủy tiến trình OTA.");
+            Update.abort();
+            isOtaUpdating = false;
+            notifyStatus("OTA_TIMEOUT");
+        }
+        delay(10);
+        return;
+    }
+
     // Nếu đang trong chu trình thêm vân tay mới hoặc chụp ảnh từ App thì bỏ qua quét thông thường
     if (isEnrolling || isCapturingImage) {
         delay(50);
@@ -2474,10 +2656,11 @@ void loop() {
     }
 
     // -------------------------------------------------------------
-    // 🚨 KIỂM TRA CẢM BIẾN RUNG SW-420 (BÁO ĐỘNG KHI XE KHÓA)
+    // 🚨 KIỂM TRA CẢM BIẾN RUNG SW-420 (BÁO ĐỘNG KHI XE KHÓA & BẬT CHỐNG DẮT)
+    // Chân DO Active HIGH: Nhảy lên HIGH (3.3V) khi có rung động
     // -------------------------------------------------------------
     static unsigned long lastVibrateTime = 0;
-    if (!isUnlocked && (digitalRead(SW420_VIBRATE_PIN) == LOW)) {
+    if (!isUnlocked && antiTheftEnabled && (digitalRead(SW420_VIBRATE_PIN) == HIGH)) {
         if (millis() - lastVibrateTime > 1500) { // Cooldown chống dội 1.5s
             lastVibrateTime = millis();
             lastActivityTime = millis();
@@ -2487,13 +2670,14 @@ void loop() {
 
     // -------------------------------------------------------------
     // 📻 KIỂM TRA TÍN HIỆU TỪ REMOTE RF 433MHz (CHỈ TÌM XE - KHÔNG MỞ KHÓA)
+    // Chân VT Active HIGH: Nhảy lên HIGH (3.3V) khi có tín hiệu remote hợp lệ
     // -------------------------------------------------------------
     static unsigned long lastRfTime = 0;
-    if (digitalRead(RF_LOCATE_PIN) == LOW) {
+    if (digitalRead(RF_LOCATE_PIN) == HIGH) {
         if (millis() - lastRfTime > 1500) { // Cooldown chống dội 1.5s
             lastRfTime = millis();
             lastActivityTime = millis();
-            Serial.println("📻 Tín hiệu RF Remote: Yêu cầu Tìm xe (Locate Only - An toàn tuyệt đối)!");
+            Serial.println("📻 Tín hiệu RF Remote: Yêu cầu Tìm xe (Locate Only - Chân VT Active HIGH)!");
             triggerLocate();
         }
     }

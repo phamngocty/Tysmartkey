@@ -1673,6 +1673,37 @@
                     </LinearLayout>
                 </LinearLayout>
 
+                <!-- GROUP 5: NÂNG CẤP HỆ THỐNG (OTA FIRMWARE) -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/card_luxury_gold_bg"
+                    android:orientation="vertical"
+                    android:padding="16dp"
+                    android:layout_marginBottom="24dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="NÂNG CẤP HỆ THỐNG (OTA)"
+                        android:textColor="@color/gold_primary"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.06"
+                        android:layout_marginBottom="12dp" />
+
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnOtaUpdate"
+                        android:layout_width="match_parent"
+                        android:layout_height="44dp"
+                        android:background="@drawable/header_icon_btn_bg"
+                        android:text="⚡ Cập Nhật Firmware Qua Bluetooth (BLE OTA)"
+                        android:textAllCaps="false"
+                        android:textColor="@color/gold_bright"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
             </LinearLayout>
         </ScrollView>
     </FrameLayout>

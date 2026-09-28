@@ -1,0 +1,21 @@
+{
+  "app": {
+    "versionCode": 2,
+    "versionName": "1.0.1",
+    "apkUrl": "",
+    "changelog": ""
+  },
+  "firmware": {
+    "versionCode": 2,
+    "versionName": "1.0.1",
+    "binUrl": "",
+    "oledBinUrl": "",
+    "changelog": ""
+  },
+  "firmware_oled": {
+    "versionCode": 2,
+    "versionName": "1.0.1",
+    "binUrl": "",
+    "changelog": ""
+  }
+}
