@@ -138,7 +138,7 @@ Bo mạch sử dụng là **ESP32-C3 SuperMini**. Các chân GPIO được tính
 | **`GPIO 1`** | RTC / UART1 | Output (TX1) | **R503 RXD (Dây Xanh lá)** | Chân phát lệnh điều khiển đèn Aura và xác thực tới cảm biến R503. |
 | **`GPIO 8`** | Strapping Pin | Output | **LED Xanh Onboard SuperMini** | Đèn LED trạng thái trên bo mạch. Logic **Active LOW**. Không kéo dây ra ngoài để bảo vệ mức logic lúc khởi động. |
 | **`GPIO 9`** | Strapping Pin | Input | **Nút BOOT Onboard** | Để trống (NC). Đảm bảo MCU luôn vào chế độ Run Mode bình thường, không kẹt Download Mode. |
-| **`GPIO 2`** | Strapping Pin / ADC1_CH2 | Input / ADC | **Đo điện áp bình ắc quy (Battery ADC)** | Mạch cầu phân áp $R_1=10\text{k}\Omega$ (nối $V_{BAT}$), $R_2=1\text{k}\Omega$ (nối GND). Tỷ lệ phân áp $1/11$ ($V_{ADC} = V_{BAT}/11$). An toàn cho ADC ESP32-C3 ($0 - 2.5\text{V}$ tương ứng $0 - 27.5\text{V}$ ắc quy). Lúc khởi động bình thường (Run Mode) GPIO 9=1 nên chân này không gây kẹt bootloader. |
+| **`GPIO 2`** | Strapping Pin / ADC1_CH2 | Input / ADC (`ANALOG`) | **Đo điện áp bình ắc quy (Battery ADC)** | Mạch cầu phân áp $R_1=100\text{k}\Omega$ (nối $V_{BAT}$), $R_2=10\text{k}\Omega$ (nối GND). Tỷ lệ phân áp lý thuyết $1/11$ ($V_{ADC} = V_{BAT} \times 10 / 110$). Cấu hình `pinMode(BATTERY_ADC_PIN, ANALOG)` và tích hợp hệ số hiệu chuẩn `batteryVoltageCalib` (mặc định $12.0/23.6$) bù trừ sai lệch đặc tính ADC ESP32-C3. Khuyến nghị gắn thêm tụ gốm $100\text{nF}$ từ GPIO 2 xuống GND để lọc phẳng nhiễu sóng RF BLE. An toàn cho ADC ($0 - 2.5\text{V}$ đo dải $0 - 27.5\text{V}$). |
 | **`3.3V`** | Nguồn | Power OUT | **VCC R503 & Touch Power** | Cấp nguồn 3.3VDC ổn định sau mạch Buck hạ áp. |
 | **`GND`** | Nối đất | Ground | **GND chung toàn hệ thống** | Đấu chung Mass của ESP32, Cảm biến R503, SW-420, RF và Relay. |
 
@@ -341,65 +341,90 @@ $$\text{<SECRET\_KEY>|<COMMAND>[|<PARAM1>|<PARAM2>|...]\n}$$
 
 ---
 
-## 5. ĐẶC TẢ QUY TRÌNH NẠP FIRMWARE TỪ XA BLE OTA (OVER-THE-AIR)
+## 5. ĐẶC TẢ HỆ THỐNG CẬP NHẬT TỪ XA TOÀN DIỆN (IN-APP APK & DUAL OTA FIRMWARE)
 
-### 5.1 Kiến trúc nạp nhị phân qua BLE
-Quy trình nạp firmware từ xa được điều phối độc lập bởi `OtaManager.kt` trên Android và thư viện `Update.h` trên ESP32-C3:
-- **Kênh truyền dữ liệu riêng biệt**: Sử dụng `OTA_DATA_UUID` (`0000ff03-0000-1000-8000-00805f9b34fb`) với thuộc tính ghi không phản hồi `WRITE_NR` để tối ưu băng thông.
-- **Kích thước khối nạp (Chunk Size)**: `240 bytes` / gói (phù hợp hoàn hảo với MTU 517 bytes).
-- **Độ trễ điều tiết (Pacing Delay)**: `CHUNK_DELAY_MS = 8ms` giữa các gói để tránh tràn bộ đệm Flash SPI trên vi điều khiển.
-- **Kiểm tra tính toàn vẹn (Integrity Check)**: Tính toán mã băm MD5 32 ký tự trước khi truyền và so sánh tự động trên vi điều khiển qua `Update.setMD5()`.
+### 5.1 Kiến trúc phân phối phiên bản tập trung (`version.json`)
+Hệ thống sử dụng file metadata chuẩn `version.json` được lưu trữ tại Server nội bộ (hoặc Cloud/DuckDNS/GitHub Releases):
+- **URL mặc định**: `http://192.168.1.114:3002/api/v1/repos/nas152/Tysmartkey/raw/version.json`
+- **Cấu trúc JSON**:
+```json
+{
+  "app": {
+    "versionCode": 3,
+    "versionName": "1.0.2",
+    "apkUrl": "http://192.168.1.114:3002/nas152/Tysmartkey/releases/download/v1.0.2/app-debug.apk",
+    "apkName": "app-debug.apk",
+    "changelog": "• Cập nhật giao diện và cải thiện độ ổn định kết nối BLE\n• Hỗ trợ hiệu chuẩn điện áp ắc quy chính xác\n• Tích hợp tính năng cập nhật In-App và OTA Firmware từ xa"
+  },
+  "firmware": {
+    "versionCode": 3,
+    "versionName": "1.0.2",
+    "binUrl": "http://192.168.1.114:3002/nas152/Tysmartkey/releases/download/v1.0.2/firmware.bin",
+    "binName": "firmware.bin",
+    "changelog": "• Khắc phục đo điện áp ADC 12V hiển thị chuẩn xác 100%\n• Relay Starter & Còi Active-LOW chống giật xung khi khởi động\n• Hỗ trợ nạp Firmware OTA siêu tốc qua BLE và WiFi HTTP"
+  }
+}
+```
 
-### 5.2 Sơ đồ trình tự tiến trình OTA (OTA Sequence Flow)
+### 5.2 Cơ chế Cập nhật Ứng dụng Di động (`UpdateManager.kt`)
+1. **Kiểm tra phiên bản tự động**: So sánh `remoteVersionCode > BuildConfig.VERSION_CODE`.
+2. **Hộp thoại Changelog Material Design**: Hiển thị chi tiết danh sách thay đổi và nút "Cập nhật ngay".
+3. **Tải ngầm với tiến độ %**: Stream file APK về thư mục `context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)`.
+4. **Cài đặt an toàn qua FileProvider**: Kích hoạt `ACTION_VIEW` với URI `content://com.example.control_esp.fileprovider/...` tương thích Android 7 đến Android 14/15.
+
+### 5.3 Hai kênh nạp Firmware (Dual-Channel Firmware OTA)
+Xe máy thường đỗ ở tầng hầm, ngoài bãi xe **không có sóng WiFi gia đình**. Hệ thống cung cấp 2 giải pháp nạp linh hoạt:
+1. **Kênh 1: BLE OTA (Tối ưu cho xe máy ngoài đường - Không cần WiFi)**:
+   - Điện thoại Android dùng 4G tải file `firmware.bin` từ `binUrl`.
+   - `UpdateManager` chuyển `ByteArray` trực tiếp sang `OtaManager.startOtaWithBytes()`.
+   - Truyền từng khối `240 bytes` qua đặc tính `OTA_DATA_UUID` (`WRITE_NR`, độ trễ 8ms) tới ESP32-C3.
+   - ESP32-C3 xác thực mã băm MD5 và ghi trực tiếp vào phân vùng `ota_1` bằng thư viện `Update.h`.
+2. **Kênh 2: WiFi HTTP OTA (Khi có mạng gia đình hoặc Điện thoại bật WiFi Hotspot)**:
+   - Gửi lệnh BLE: `<KEY>|WIFI_OTA|<SSID>|<PASSWORD>` (hoặc kèm URL tùy chọn).
+   - ESP32-C3 tự kết nối WiFi trong 15s, tải `version.json`, kiểm tra `remoteVersion > CURRENT_FW_VERSION`.
+   - Sử dụng `HTTPUpdate.h` và `ArduinoJson` tải và ghi trực tiếp file `.bin` từ `binUrl` vào Flash SPI.
+   - Nháy LED Aura tím báo hiệu, nháy LED Onboard GPIO 8 theo nhịp ghi Flash, tự khởi động lại khi hoàn tất.
+
+### 5.4 Sơ đồ trình tự tiến trình BLE OTA (OTA Sequence Flow)
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor User as Người dùng
-    participant App as Android OtaManager
+    participant App as Android UpdateManager / OtaManager
+    participant Server as Update Server (version.json)
     participant MCU as ESP32-C3 (Update.h)
     participant Flash as Flash Partition (ota_1)
 
-    User->>App: Chọn file firmware.bin từ máy
-    App->>App: Đọc bytes, kiểm tra size <= 1.875MB & tính MD5
-    App->>MCU: OTA_BEGIN|<size>|<md5>
+    User->>App: Mở App / Bấm Kiểm tra Cập nhật
+    App->>Server: GET version.json
+    Server-->>App: Trả về metadata phiên bản (app + firmware)
     
-    alt Xe đang mở khóa (isUnlocked == true)
-        MCU-->>App: FB|OTA_ERR_VEHICLE_ON
-        App-->>User: Cảnh báo: Tắt khóa xe trước khi cập nhật!
-    else ESP32 đang bận
-        MCU-->>App: FB|OTA_ERR_BUSY
-    else Hợp lệ
-        MCU->>MCU: Tạm ngắt cảm biến rung, nút bấm, sleep
+    alt Có bản cập nhật Firmware mới
+        App->>Server: Tải firmware.bin từ binUrl (4G/WiFi)
+        Server-->>App: Byte stream firmware.bin
+        App->>MCU: OTA_BEGIN|<size>|<md5>
         MCU->>Flash: Update.begin(size, U_FLASH) & Update.setMD5(md5)
         MCU-->>App: FB|OTA_READY
         
-        loop Truyền khối dữ liệu (Chunk Streaming)
-            App->>MCU: Gửi chunk 240 bytes qua OTA_DATA_UUID (WRITE_NR)
+        loop Truyền khối dữ liệu BLE (240 bytes/gói)
+            App->>MCU: Chunk 240 bytes qua OTA_DATA_UUID (WRITE_NR)
             MCU->>Flash: Update.write(chunk)
-            App->>App: Cập nhật Progress Bar (%, tốc độ KB/s)
-            Note over App,MCU: Delay 8ms chống tràn buffer Flash
+            App->>App: Cập nhật Progress Bar (% và tốc độ KB/s)
         end
         
         App->>MCU: OTA_END
         MCU->>Flash: Update.end(true) & Kiểm tra MD5
-        
-        alt Khớp MD5 & Ghi thành công
-            MCU-->>App: FB|OTA_SUCCESS
-            App-->>User: Cập nhật 100% thành công! Xe đang khởi động lại...
-            MCU->>MCU: delay(1000) -> esp_restart() boot vào app1
-        else Sai Checksum / Lỗi ghi
-            MCU-->>App: FB|OTA_ERR_VERIFY / FB|OTA_ERR_WRITE
-            MCU->>Flash: Update.abort() - Giữ nguyên app0
-            App-->>User: Báo lỗi cập nhật!
-        end
+        MCU-->>App: FB|OTA_SUCCESS
+        MCU->>MCU: delay(1000) -> esp_restart()
     end
 ```
 
-### 5.3 Quy tắc an toàn chống Brick vi điều khiển (Fail-Safe Rollback)
+### 5.5 Quy tắc an toàn chống Brick vi điều khiển (Fail-Safe Rollback)
 1. **Khóa chức năng khi nạp**: Khi `isOtaUpdating == true`, firmware tạm khóa toàn bộ việc quét vân tay, cảm biến rung, và vô hiệu hóa chế độ ngủ Deep Sleep.
-2. **Timeout 15 giây**: Nếu quá 15 giây không nhận thêm khối dữ liệu mới (do mất sóng hoặc thoát app), ESP32 tự động gọi `Update.abort()`, hủy bỏ phân vùng nháp và quay về hoạt động bình thường.
-3. **Mất kết nối đột ngột (GATT Disconnect)**: Sự kiện `onDisconnect()` tự động phát hiện nếu đang OTA sẽ lập tức hủy tiến trình an toàn, bảo vệ phân vùng đang chạy hiện tại.
+2. **Chặn nạp khi xe đang chạy**: Nếu `isUnlocked == true`, lệnh OTA lập tức bị từ chối (`OTA_ERR_VEHICLE_ON`) để đảm bảo an toàn tuyệt đối khi xe đang lăn bánh.
+3. **Timeout 15 giây**: Nếu quá 15 giây không nhận thêm khối dữ liệu mới (do mất sóng hoặc thoát app), ESP32 tự động gọi `Update.abort()`, hủy bỏ phân vùng nháp và quay về hoạt động bình thường.
+4. **Mất kết nối đột ngột (GATT Disconnect)**: Sự kiện `onDisconnect()` tự động phát hiện nếu đang OTA sẽ lập tức hủy tiến trình an toàn, bảo vệ phân vùng đang chạy hiện tại.
 
 ---
 

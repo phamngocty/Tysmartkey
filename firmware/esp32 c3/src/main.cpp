@@ -5,6 +5,17 @@
 #include <mbedtls/base64.h>
 #include <esp_sleep.h>
 #include <Update.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <HTTPUpdate.h>
+#include <ArduinoJson.h>
+
+// ==========================================
+// 🚀 QUẢN LÝ PHIÊN BẢN & CẬP NHẬT OTA TỪ XA
+// ==========================================
+const int CURRENT_FW_VERSION = 3;
+const char* CURRENT_FW_VERSION_NAME = "1.0.2";
+const char* VERSION_CHECK_URL = "http://192.168.1.114:3002/api/v1/repos/nas152/Tysmartkey/raw/version.json";
 
 // ==========================================
 // 📌 1. ĐỊNH NGHĨA CHÂN PHẦN CỨNG (ESP32-C3)
@@ -113,6 +124,9 @@ unsigned long testFpUntil = 0;
 bool pendingIdleLedUpdate = false;
 unsigned long pendingIdleLedUntil = 0;
 
+// Hệ số hiệu chuẩn ADC đo điện áp ắc quy (Mặc định 12.0V / 23.6V = ~0.5085f để bù trừ sai lệch x2 của analogReadMilliVolts trên ESP32-C3)
+float batteryVoltageCalib = 12.0f / 23.6f;
+
 // ==========================================
 // 💤 QUẢN LÝ NGUỒN 2 TẦNG (POWER MANAGEMENT)
 // ==========================================
@@ -157,17 +171,24 @@ void notifyStatus(String msg) {
     }
 }
 
-// Đọc điện áp bình ắc quy qua cầu phân áp 1k - 10k trên chân GPIO 2 (ADC1_CH2)
-// Cầu phân áp: R1 = 10k (nối V_BAT), R2 = 1k (nối GND) -> Hệ số nhân = (10k + 1k) / 1k = 11.0
+// Đọc điện áp bình ắc quy qua cầu phân áp 100k - 10k trên chân GPIO 2 (ADC1_CH2)
+// Cầu phân áp: R1 = 100k (nối V_BAT), R2 = 10k (nối GND) -> Hệ số phân áp lý thuyết = (100k + 10k) / 10k = 11.0f
+// Do analogReadMilliVolts() trên ESP32-C3 với ADC_11db bị sai số tỷ lệ ~x2 so với thực tế (12V đọc thành ~23.6V),
+// giá trị được nhân với batteryVoltageCalib (mặc định 12.0 / 23.6) để trả về điện áp ắc quy chuẩn xác tuyệt đối.
 float readBatteryVoltage() {
+    // Warm-up ADC 2 lần trước khi lấy mẫu
+    analogReadMilliVolts(BATTERY_ADC_PIN);
+    analogReadMilliVolts(BATTERY_ADC_PIN);
+
     uint32_t sumMv = 0;
-    const int SAMPLES = 16;
+    const int SAMPLES = 32;
     for (int i = 0; i < SAMPLES; i++) {
         sumMv += analogReadMilliVolts(BATTERY_ADC_PIN);
-        delay(1);
+        delayMicroseconds(250);
     }
     float avgMv = (float)sumMv / (float)SAMPLES;
-    float voltage = (avgMv * 11.0f) / 1000.0f; // Chuyển sang Volt và nhân hệ số phân áp 11.0
+    float rawVoltage = (avgMv * 11.0f) / 1000.0f; // Chuyển sang Volt và nhân hệ số phân áp 11.0
+    float voltage = rawVoltage * batteryVoltageCalib; // Hiệu chỉnh về điện áp thực tế
     return voltage;
 }
 
@@ -2174,6 +2195,39 @@ void processIncomingCommand(String data) {
         sendTelemetry();
     }
 
+    // --- LỆNH HIỆU CHUẨN ĐO ĐIỆN ÁP ẮC QUY QUA BLE ---
+    else if (cmd == "CALIB_VOLT") {
+        // Cú pháp: <KEY>|CALIB_VOLT|<real_voltage> (Ví dụ: CALIB_VOLT|12.0)
+        float realV = params.toFloat();
+        if (realV >= 5.0f && realV <= 30.0f) {
+            uint32_t sumMv = 0;
+            const int SAMPLES = 32;
+            analogReadMilliVolts(BATTERY_ADC_PIN);
+            analogReadMilliVolts(BATTERY_ADC_PIN);
+            for (int i = 0; i < SAMPLES; i++) {
+                sumMv += analogReadMilliVolts(BATTERY_ADC_PIN);
+                delayMicroseconds(250);
+            }
+            float avgMv = (float)sumMv / (float)SAMPLES;
+            float rawVoltage = (avgMv * 11.0f) / 1000.0f;
+            if (rawVoltage > 0.5f) {
+                batteryVoltageCalib = realV / rawVoltage;
+                prefsSecurity.putFloat("v_calib", batteryVoltageCalib);
+                Serial.printf("✅ Đã cân chỉnh hệ số ADC mới: %.5f (V_thực = %.2fV)\n", batteryVoltageCalib, realV);
+                notifyStatus("CALIB_VOLT_OK|" + String(readBatteryVoltage(), 2));
+                sendTelemetry();
+                beep(1, 100);
+            } else {
+                notifyStatus("CALIB_VOLT_ERR_NO_POWER");
+            }
+        } else {
+            notifyStatus("CALIB_VOLT_ERR_PARAM");
+        }
+    }
+    else if (cmd == "GET_VOLT_CALIB") {
+        notifyStatus("VOLT_CALIB|" + String(batteryVoltageCalib, 5) + "|" + String(readBatteryVoltage(), 2));
+    }
+
     // --- LỆNH NÂNG CẤP FIRMWARE TỪ XA QUA BLE (BLE OTA) ---
     else if (cmd == "OTA_BEGIN") {
         if (isUnlocked) {
@@ -2249,6 +2303,164 @@ void processIncomingCommand(String data) {
             notifyStatus("OTA_ABORTED");
         }
     }
+
+    // --- LỆNH KIỂM TRA PHIÊN BẢN & CẬP NHẬT FIRMWARE QUA WIFI ---
+    else if (cmd == "GET_FW_INFO") {
+        notifyStatus("FW_INFO|" + String(CURRENT_FW_VERSION) + "|" + String(CURRENT_FW_VERSION_NAME));
+    }
+    else if (cmd == "WIFI_OTA") {
+        // Cú pháp: <KEY>|WIFI_OTA|<SSID>|<PASSWORD> hoặc <KEY>|WIFI_OTA|<SSID>|<PASSWORD>|<CUSTOM_URL>
+        if (isUnlocked) {
+            Serial.println("❌ [WIFI_OTA] Bị từ chối: Xe đang mở khóa ACC!");
+            notifyStatus("OTA_ERR_VEHICLE_ON");
+            return;
+        }
+        int p1 = params.indexOf('|');
+        if (p1 == -1) {
+            notifyStatus("WIFI_OTA_ERR_PARAM");
+            return;
+        }
+        String ssid = params.substring(0, p1);
+        String rest = params.substring(p1 + 1);
+        int p2 = rest.indexOf('|');
+        String pass = (p2 != -1) ? rest.substring(0, p2) : rest;
+        String customUrl = (p2 != -1) ? rest.substring(p2 + 1) : "";
+        customUrl.trim();
+
+        notifyStatus("WIFI_OTA_CONNECTING");
+        struct WifiOtaTaskArgs {
+            String s;
+            String p;
+            String u;
+        };
+        WifiOtaTaskArgs* args = new WifiOtaTaskArgs{ssid, pass, customUrl};
+
+        xTaskCreate([](void* param) {
+            WifiOtaTaskArgs* a = (WifiOtaTaskArgs*)param;
+            extern bool performWiFiOta(const String& ssid, const String& pass, const String& customUrl);
+            performWiFiOta(a->s, a->p, a->u);
+            delete a;
+            vTaskDelete(NULL);
+        }, "wifi_ota_task", 8192, args, 1, NULL);
+    }
+}
+
+// Hàm kết nối WiFi và nạp Firmware từ xa qua HTTP
+bool performWiFiOta(const String& ssid, const String& pass, const String& customUrl) {
+    Serial.printf("📡 [WIFI_OTA] Đang kết nối WiFi: %s ...\n", ssid.c_str());
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid.c_str(), pass.c_str());
+
+    unsigned long startConn = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - startConn < 15000) {
+        delay(500);
+        Serial.print(".");
+    }
+    Serial.println();
+
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("❌ [WIFI_OTA] Kết nối WiFi thất bại hoặc quá thời gian chờ (15s)!");
+        notifyStatus("WIFI_OTA_ERR_CONNECT");
+        WiFi.disconnect(true);
+        WiFi.mode(WIFI_OFF);
+        return false;
+    }
+
+    Serial.printf("✅ [WIFI_OTA] Đã kết nối WiFi! IP: %s\n", WiFi.localIP().toString().c_str());
+    notifyStatus("WIFI_OTA_CONNECTED");
+
+    String url = customUrl.length() > 0 ? customUrl : String(VERSION_CHECK_URL);
+    Serial.printf("🌐 [WIFI_OTA] Kiểm tra version từ: %s\n", url.c_str());
+
+    HTTPClient http;
+    http.begin(url);
+    int httpCode = http.GET();
+    if (httpCode != HTTP_CODE_OK) {
+        Serial.printf("❌ [WIFI_OTA] Không thể tải version.json! Mã HTTP: %d\n", httpCode);
+        notifyStatus("WIFI_OTA_ERR_JSON_HTTP");
+        http.end();
+        WiFi.disconnect(true);
+        WiFi.mode(WIFI_OFF);
+        return false;
+    }
+
+    String jsonPayload = http.getString();
+    http.end();
+
+    DynamicJsonDocument doc(2048);
+    DeserializationError err = deserializeJson(doc, jsonPayload);
+    if (err) {
+        Serial.printf("❌ [WIFI_OTA] Lỗi phân tích cú pháp JSON: %s\n", err.c_str());
+        notifyStatus("WIFI_OTA_ERR_JSON_PARSE");
+        WiFi.disconnect(true);
+        WiFi.mode(WIFI_OFF);
+        return false;
+    }
+
+    int remoteVersion = doc["firmware"]["versionCode"] | 0;
+    const char* remoteName = doc["firmware"]["versionName"] | "Unknown";
+    const char* binUrl = doc["firmware"]["binUrl"] | "";
+
+    Serial.printf("🔍 [WIFI_OTA] Hiện tại: v%s (%d) | Máy chủ: v%s (%d)\n",
+                  CURRENT_FW_VERSION_NAME, CURRENT_FW_VERSION, remoteName, remoteVersion);
+
+    if (strlen(binUrl) == 0) {
+        Serial.println("❌ [WIFI_OTA] Không tìm thấy URL file firmware .bin trong JSON!");
+        notifyStatus("WIFI_OTA_ERR_NO_URL");
+        WiFi.disconnect(true);
+        WiFi.mode(WIFI_OFF);
+        return false;
+    }
+
+    if (remoteVersion <= CURRENT_FW_VERSION) {
+        Serial.println("ℹ️ [WIFI_OTA] Firmware hiện tại đã là bản mới nhất.");
+        notifyStatus("WIFI_OTA_LATEST");
+        WiFi.disconnect(true);
+        WiFi.mode(WIFI_OFF);
+        return true;
+    }
+
+    Serial.printf("⬇️ [WIFI_OTA] Bắt đầu tải và nạp file .bin từ: %s\n", binUrl);
+    notifyStatus("WIFI_OTA_DOWNLOADING");
+
+    // Hiệu ứng đèn nhấp nháy báo nạp Firmware
+    r503SetAuraLed(LED_MODE_FLASHING, LED_COLOR_PURPLE, 50, 0);
+
+    WiFiClient client;
+    httpUpdate.setLedPin(ONBOARD_LED_PIN, LOW); // Nháy đèn Onboard khi ghi Flash
+    httpUpdate.rebootOnUpdate(false);
+
+    t_httpUpdate_return ret = httpUpdate.update(client, binUrl);
+    switch (ret) {
+        case HTTP_UPDATE_FAILED:
+            Serial.printf("❌ [WIFI_OTA] Nạp thất bại! Lỗi (%d): %s\n",
+                          httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
+            notifyStatus("WIFI_OTA_ERR_FLASH");
+            ledError();
+            WiFi.disconnect(true);
+            WiFi.mode(WIFI_OFF);
+            return false;
+
+        case HTTP_UPDATE_NO_UPDATES:
+            Serial.println("ℹ️ [WIFI_OTA] Không có bản cập nhật mới.");
+            notifyStatus("WIFI_OTA_NO_UPDATES");
+            WiFi.disconnect(true);
+            WiFi.mode(WIFI_OFF);
+            return false;
+
+        case HTTP_UPDATE_OK:
+            Serial.println("🎉 [WIFI_OTA] Nâng cấp Firmware THÀNH CÔNG! Đang khởi động lại...");
+            notifyStatus("WIFI_OTA_SUCCESS");
+            ledSuccess();
+            beep(2, 100);
+            delay(1500);
+            ESP.restart();
+            return true;
+    }
+
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    return false;
 }
 
 // ==========================================
@@ -2419,8 +2631,9 @@ void setup() {
     pinMode(ONBOARD_LED_PIN, OUTPUT);
     digitalWrite(ONBOARD_LED_PIN, HIGH); // Active LOW: Tắt LED xanh Onboard
 
-    // Cấu hình chân đo điện áp ắc quy ADC (GPIO 2 - ADC1_CH2, Cầu phân áp 1k - 10k)
-    pinMode(BATTERY_ADC_PIN, INPUT);
+    // Cấu hình chân đo điện áp ắc quy ADC (GPIO 2 - ADC1_CH2, Cầu phân áp 100k - 10k)
+    // Dùng chế độ ANALOG để tắt digital input buffer và triệt tiêu dòng rò
+    pinMode(BATTERY_ADC_PIN, ANALOG);
     analogSetAttenuation(ADC_11db); // Dải đo điện áp ADC tối ưu lên đến ~2.6V - 3.1V
 
     // Cấu hình chân tín hiệu Module RF 433MHz (Chân VT Active HIGH: Nhấn remote = 3.3V)
@@ -2437,6 +2650,9 @@ void setup() {
     prefsFinger.begin("fingerprint", false);
     prefsRain.begin("rain_config", false);
     loadLedConfig();
+
+    batteryVoltageCalib = prefsSecurity.getFloat("v_calib", 12.0f / 23.6f);
+    Serial.printf("🔋 Cân chỉnh ADC Ắc quy: Hệ số = %.5f | Điện áp hiện tại = %.2fV\n", batteryVoltageCalib, readBatteryVoltage());
 
     SECRET_KEY = prefsSecurity.getString("master_key", "271000");
     isUnlocked = prefsSecurity.getBool("is_unlocked", false);
