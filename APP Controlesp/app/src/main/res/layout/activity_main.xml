@@ -29,20 +29,40 @@
 
         <!-- Title & Status -->
         <LinearLayout
+            android:id="@+id/llHeaderTitleContainer"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:orientation="vertical">
+            android:orientation="vertical"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="?attr/selectableItemBackground">
 
-            <TextView
-                android:id="@+id/tvTitle"
+            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="XE TSMARTKEY"
-                android:textColor="@color/white"
-                android:textSize="16sp"
-                android:textStyle="bold"
-                android:letterSpacing="-0.02" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/tvTitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="XE TSMARTKEY"
+                    android:textColor="@color/white"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="-0.02" />
+
+                <ImageView
+                    android:id="@+id/ivHeaderEditName"
+                    android:layout_width="14dp"
+                    android:layout_height="14dp"
+                    android:layout_marginStart="6dp"
+                    android:src="@drawable/ic_edit"
+                    app:tint="@color/gold_primary"
+                    android:contentDescription="Đổi tên xe" />
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/tvStatus"
@@ -722,6 +742,48 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content" />
                     </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/border_subtle"
+                        android:layout_marginVertical="4dp" />
+
+                    <!-- Toggle 3: Background Service Run -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:paddingVertical="8dp">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Chạy ngầm (Luôn sẵn sàng)"
+                                android:textColor="@color/white"
+                                android:textSize="14sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Duy trì kết nối xe ngay cả khi tắt màn hình"
+                                android:textColor="@color/secondary_teal"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <androidx.appcompat.widget.SwitchCompat
+                            android:id="@+id/cbBackgroundRunTab2"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
                 </LinearLayout>
 
             </LinearLayout>
@@ -1336,18 +1398,38 @@
                         android:orientation="horizontal">
 
                         <LinearLayout
+                            android:id="@+id/llVehicleNameClickArea"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:orientation="vertical">
+                            android:orientation="vertical"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:background="?attr/selectableItemBackground">
 
-                            <TextView
+                            <LinearLayout
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="XE_tsmart_BLE"
-                                android:textColor="@color/white"
-                                android:textSize="14sp"
-                                android:textStyle="bold" />
+                                android:orientation="horizontal"
+                                android:gravity="center_vertical">
+
+                                <TextView
+                                    android:id="@+id/tvVehicleCardTitle"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Honda SH 150i"
+                                    android:textColor="@color/white"
+                                    android:textSize="14sp"
+                                    android:textStyle="bold" />
+
+                                <ImageView
+                                    android:layout_width="13dp"
+                                    android:layout_height="13dp"
+                                    android:layout_marginStart="6dp"
+                                    android:src="@drawable/ic_edit"
+                                    app:tint="@color/gold_primary"
+                                    android:contentDescription="Đổi tên xe" />
+                            </LinearLayout>
 
                             <TextView
                                 android:id="@+id/tvDeviceName"
@@ -1360,16 +1442,34 @@
                                 android:fontFamily="monospace" />
                         </LinearLayout>
 
-                        <androidx.appcompat.widget.AppCompatButton
-                            android:id="@+id/btnScanBle"
+                        <LinearLayout
                             android:layout_width="wrap_content"
-                            android:layout_height="34dp"
-                            android:background="@drawable/header_icon_btn_bg"
-                            android:text="Đổi xe"
-                            android:textAllCaps="false"
-                            android:textColor="@color/gold_primary"
-                            android:textSize="12sp"
-                            android:paddingHorizontal="14dp" />
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal">
+
+                            <androidx.appcompat.widget.AppCompatButton
+                                android:id="@+id/btnRenameVehicle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="34dp"
+                                android:background="@drawable/header_icon_btn_bg"
+                                android:text="Đổi tên"
+                                android:textAllCaps="false"
+                                android:textColor="@color/gold_primary"
+                                android:textSize="12sp"
+                                android:layout_marginEnd="6dp"
+                                android:paddingHorizontal="10dp" />
+
+                            <androidx.appcompat.widget.AppCompatButton
+                                android:id="@+id/btnScanBle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="34dp"
+                                android:background="@drawable/header_icon_btn_bg"
+                                android:text="Đổi xe"
+                                android:textAllCaps="false"
+                                android:textColor="@color/secondary_teal"
+                                android:textSize="12sp"
+                                android:paddingHorizontal="10dp" />
+                        </LinearLayout>
                     </LinearLayout>
 
                     <androidx.appcompat.widget.AppCompatButton
@@ -1413,7 +1513,7 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Tự pair ngầm khi mở app"
+                                android:text="Tự pair khi mở app"
                                 android:textColor="@color/text_muted"
                                 android:textSize="11sp" />
                         </LinearLayout>
@@ -1422,6 +1522,152 @@
                             android:id="@+id/cbAutoConnect"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/border_subtle"
+                        android:layout_marginVertical="10dp" />
+
+                    <!-- CHẠY NGẦM LIÊN TỤC -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Chạy ngầm (Luôn sẵn sàng)"
+                                android:textColor="@color/white"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Giữ kết nối ngay cả khi tắt màn hình"
+                                android:textColor="@color/secondary_teal"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <androidx.appcompat.widget.SwitchCompat
+                            android:id="@+id/cbBackgroundRun"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnBatteryOptimization"
+                        android:layout_width="match_parent"
+                        android:layout_height="36dp"
+                        android:layout_marginTop="10dp"
+                        android:background="@drawable/header_icon_btn_bg"
+                        android:text="🔋 Cấp quyền không giới hạn pin (Khuyên dùng)"
+                        android:textAllCaps="false"
+                        android:textColor="@color/gold_bright"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <!-- GROUP: ĐỒNG HỒ THÔNG MINH WEAR OS (SMARTWATCH) -->
+                <LinearLayout
+                    android:id="@+id/cardWearWatchStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/card_luxury_gold_bg"
+                    android:orientation="vertical"
+                    android:padding="16dp"
+                    android:layout_marginBottom="14dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="12dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="ĐỒNG HỒ THÔNG MINH WEAR OS"
+                            android:textColor="@color/gold_primary"
+                            android:textSize="12sp"
+                            android:textStyle="bold"
+                            android:letterSpacing="0.06" />
+
+                        <TextView
+                            android:id="@+id/tvWatchStatusBadge"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/header_icon_btn_bg"
+                            android:paddingHorizontal="8dp"
+                            android:paddingVertical="3dp"
+                            android:text="Chưa kết nối"
+                            android:textColor="@color/text_muted"
+                            android:textSize="11sp"
+                            android:fontFamily="sans-serif-medium" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageView
+                            android:id="@+id/ivWatchStatusIcon"
+                            android:layout_width="36dp"
+                            android:layout_height="36dp"
+                            android:src="@drawable/ic_watch_smart"
+                            app:tint="@color/gold_primary"
+                            android:layout_marginEnd="12dp"
+                            android:contentDescription="Đồng hồ thông minh" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:id="@+id/tvWatchDeviceName"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Đồng hồ: Chưa kết nối"
+                                android:textColor="@color/white"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tvWatchStatusDesc"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:text="Mở app trên đồng hồ Wear OS để đồng bộ"
+                                android:textColor="@color/text_muted"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btnSyncWatchNow"
+                            android:layout_width="wrap_content"
+                            android:layout_height="34dp"
+                            android:background="@drawable/header_icon_btn_bg"
+                            android:text="Đồng bộ"
+                            android:textAllCaps="false"
+                            android:textColor="@color/gold_primary"
+                            android:textSize="12sp"
+                            android:paddingHorizontal="10dp" />
                     </LinearLayout>
                 </LinearLayout>
 

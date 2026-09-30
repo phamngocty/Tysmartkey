@@ -13,18 +13,40 @@ class WearMessageListenerService : WearableListenerService() {
         
         when (messageEvent.path) {
             "/ping" -> {
-                Log.d("WEAR_BRIDGE", "Ping received from watch!")
+                Log.d("WEAR_BRIDGE", "Ping received from watch! Syncing current state...")
+                WatchSyncHelper.syncCurrentStateToWatch(this)
             }
             "/command" -> {
                 val command = String(messageEvent.data)
                 Log.d("WEAR_BRIDGE", "Received command content: $command")
+                if (command == "1") {
+                    WatchSyncHelper.isVehiclePowerOn = true
+                } else if (command == "0") {
+                    WatchSyncHelper.isVehiclePowerOn = false
+                }
                 handleCommand(command)
+                WatchSyncHelper.syncCurrentStateToWatch(this)
             }
             else -> {
                 Log.d("WEAR_BRIDGE", "Unknown path: ${messageEvent.path}")
                 super.onMessageReceived(messageEvent)
             }
         }
+    }
+
+    override fun onPeerConnected(peer: com.google.android.gms.wearable.Node) {
+        super.onPeerConnected(peer)
+        Log.d("WEAR_BRIDGE", "Watch peer connected: ${peer.displayName} (${peer.id})")
+        WatchSyncHelper.isWatchConnected = true
+        WatchSyncHelper.connectedWatchName = peer.displayName
+        WatchSyncHelper.onWatchConnectionStatusChanged?.invoke(true, peer.displayName)
+        WatchSyncHelper.syncCurrentStateToWatch(this)
+    }
+
+    override fun onPeerDisconnected(peer: com.google.android.gms.wearable.Node) {
+        super.onPeerDisconnected(peer)
+        Log.d("WEAR_BRIDGE", "Watch peer disconnected: ${peer.displayName}")
+        WatchSyncHelper.checkWatchConnection(this)
     }
 
     private fun handleCommand(command: String) {
@@ -67,8 +89,10 @@ class WearMessageListenerService : WearableListenerService() {
                     if (success) {
                         Log.d("WEAR_BRIDGE", "Background BLE connected! Relaying command: $command")
                         BleManager.sendCommand(command)
+                        WatchSyncHelper.syncCurrentStateToWatch(this)
                     } else {
                         Log.e("WEAR_BRIDGE", "Background BLE connection failed to $mac")
+                        WatchSyncHelper.syncCurrentStateToWatch(this)
                     }
                 }
             } else {
@@ -79,8 +103,10 @@ class WearMessageListenerService : WearableListenerService() {
                         if (success) {
                             Log.d("WEAR_BRIDGE", "Background Classic connected! Relaying command: $command")
                             BluetoothController.sendCommand(command)
+                            WatchSyncHelper.syncCurrentStateToWatch(this)
                         } else {
                             Log.e("WEAR_BRIDGE", "Background Classic connection failed to $mac")
+                            WatchSyncHelper.syncCurrentStateToWatch(this)
                         }
                     }
                 } catch (e: Exception) {

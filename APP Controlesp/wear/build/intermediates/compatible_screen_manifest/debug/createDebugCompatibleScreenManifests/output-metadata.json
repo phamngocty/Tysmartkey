@@ -4,7 +4,7 @@
     "type": "COMPATIBLE_SCREEN_MANIFEST",
     "kind": "Directory"
   },
-  "applicationId": "com.example.control_esp.wear",
+  "applicationId": "com.example.control_esp",
   "variantName": "debug",
   "elements": []
 }

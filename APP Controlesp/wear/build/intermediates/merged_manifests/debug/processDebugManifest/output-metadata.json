@@ -4,7 +4,7 @@
     "type": "MERGED_MANIFESTS",
     "kind": "Directory"
   },
-  "applicationId": "com.example.control_esp.wear",
+  "applicationId": "com.example.control_esp",
   "variantName": "debug",
   "elements": [
     {

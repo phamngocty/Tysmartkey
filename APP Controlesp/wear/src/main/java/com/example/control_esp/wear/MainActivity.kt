@@ -1,10 +1,15 @@
 package com.example.control_esp.wear
 
+import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,11 +17,9 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
-import androidx.wear.compose.foundation.pager.HorizontalPager
-import androidx.wear.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,118 +29,159 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.semantics.*
+import androidx.wear.compose.foundation.pager.HorizontalPager
+import androidx.wear.compose.foundation.pager.rememberPagerState
 import androidx.wear.compose.material.*
+import com.google.android.gms.wearable.*
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import com.google.android.gms.wearable.*
+import java.util.Locale
 
-class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, SensorEventListener {
+class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, MessageClient.OnMessageReceivedListener, SensorEventListener {
+
+    companion object {
+        private const val TAG = "WEAR_APP"
+    }
 
     private var sensorManager: SensorManager? = null
     private var accelSensor: Sensor? = null
     private var lastGestureTime = 0L
 
+    // State quan sát thời gian thực trên Jetpack Compose
     private var isEspConnected by mutableStateOf(false)
     private var isVehicleOn by mutableStateOf(false)
     private var isEngineStarting by mutableStateOf(false)
     private var isAutoStartEnabled by mutableStateOf(false)
     private var isGestureEnabled by mutableStateOf(true) // Cho phép búng tay đề máy
-    private var engineStartCount by mutableStateOf(0) // Đếm số lần đề máy
     private var statusText by mutableStateOf("ĐANG KHỞI TẠO")
+    private var vehicleDistance by mutableStateOf(-1f)
+    private var vehicleRssi by mutableStateOf(0)
+    private var vehicleNameOnWatch by mutableStateOf("Xe Tsmartkey")
 
-    @OptIn(ExperimentalFoundationApi::class)
+    // Lọc mẫu cho cảm biến gia tốc
+    private var lastX = 0f
+    private var lastY = 0f
+    private var lastZ = 0f
+    private var isFirstSample = true
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // 1. Tải cấu hình từ SharedPreferences
+        val prefs = getSharedPreferences("WEAR_PREF", Context.MODE_PRIVATE)
+        isAutoStartEnabled = prefs.getBoolean("AUTO_START", false)
+        isGestureEnabled = prefs.getBoolean("GESTURE_START", true)
+
+        // 2. Khởi tạo SensorManager an toàn ngay trong onCreate (trước khi Compose hiển thị)
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        accelSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
+            ?: sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+
+        // 3. Thiết lập giao diện Compose
         setContent {
-            var isPhoneConnected by remember { mutableStateOf(false) }
-            val pagerState = rememberPagerState(pageCount = { 3 })
-            val pageIndicatorState = remember {
-                object : PageIndicatorState {
-                    override val pageCount: Int get() = pagerState.pageCount
-                    override val pageOffset: Float get() = pagerState.currentPageOffsetFraction
-                    override val selectedPage: Int get() = pagerState.currentPage
-                }
+            WearMainScreen()
+        }
+
+        // 4. Gửi ping tới điện thoại để đồng bộ tức thì khi mở app
+        sendCommandToPhone(data = "ping", path = "/ping")
+    }
+
+    @OptIn(ExperimentalFoundationApi::class)
+    @Composable
+    private fun WearMainScreen() {
+        var isPhoneConnected by remember { mutableStateOf(false) }
+        val pagerState = rememberPagerState(pageCount = { 3 })
+        val pageIndicatorState = remember {
+            object : PageIndicatorState {
+                override val pageCount: Int get() = 3
+                override val pageOffset: Float get() = pagerState.currentPageOffsetFraction.coerceIn(0f, 1f)
+                override val selectedPage: Int get() = pagerState.currentPage
             }
+        }
+        val scope = rememberCoroutineScope()
 
-            LaunchedEffect(Unit) {
-                // Load settings
-                val prefs = getSharedPreferences("WEAR_PREF", MODE_PRIVATE)
-                isAutoStartEnabled = prefs.getBoolean("AUTO_START", false)
-                isGestureEnabled = prefs.getBoolean("GESTURE_START", true)
-
-                // Init sensors
-                sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
-                accelSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
-
-                // Gửi Ping khi mở app để kiểm tra kết nối
-                sendCommandToPhone(data = "ping", path = "/ping")
-
-                while(true) {
-                    Wearable.getNodeClient(this@MainActivity).connectedNodes.addOnSuccessListener { nodes ->
-                        isPhoneConnected = nodes.isNotEmpty()
-                        if (!isPhoneConnected) {
-                            statusText = "MẤT KẾT NỐI ĐT"
-                            isEspConnected = false
-                        } else if (!isEspConnected) {
-                            statusText = "CHƯA KẾT NỐI XE"
-                        }
+        // Định kỳ kiểm tra kết nối với điện thoại và ping lấy trạng thái xe tức thời
+        LaunchedEffect(Unit) {
+            while (true) {
+                Wearable.getNodeClient(this@MainActivity).connectedNodes.addOnSuccessListener { nodes ->
+                    isPhoneConnected = nodes.isNotEmpty()
+                    if (!isPhoneConnected) {
+                        statusText = "MẤT KẾT NỐI ĐT"
+                        isEspConnected = false
+                    } else {
+                        // Điện thoại đã kết nối, ping lấy trạng thái ESP32 mới nhất
+                        sendCommandToPhone(data = "ping", path = "/ping")
                     }
-                    kotlinx.coroutines.delay(5000)
                 }
+                delay(3000)
             }
+        }
 
-            val scope = rememberCoroutineScope()
-            MaterialTheme {
-                // Sử dụng duy nhất Box và Button chuẩn để tránh xung đột hệ thống
-                Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-                    HorizontalPager(state = pagerState) { page ->
-                        when (page) {
-                            0 -> MainControlScreen(
-                                statusText = statusText,
-                                isPhoneConnected = isPhoneConnected,
-                                isEspConnected = isEspConnected,
-                                isVehicleOn = isVehicleOn,
-                                isEngineStarting = isEngineStarting,
-                                onSendCommand = { cmd ->
-                                    onSendCommandWithAutoStart(cmd, scope)
-                                },
-                                onLongClick = {
-                                    triggerEngineStart()
-                                }
-                            )
-                            1 -> AdvancedScreen(isPhoneConnected, isEspConnected) { onSendCommandWithAutoStart(it, scope) }
-                            2 -> SettingsScreen(
-                                isPhoneConnected = isPhoneConnected,
-                                isEspConnected = isEspConnected,
-                                isAutoStartEnabled = isAutoStartEnabled,
-                                isGestureEnabled = isGestureEnabled,
-                                onAutoStartToggle = {
-                                    isAutoStartEnabled = it
-                                    getSharedPreferences("WEAR_PREF", MODE_PRIVATE).edit()
-                                        .putBoolean("AUTO_START", it).apply()
-                                },
-                                onGestureToggle = {
-                                    isGestureEnabled = it
-                                    getSharedPreferences("WEAR_PREF", MODE_PRIVATE).edit()
-                                        .putBoolean("GESTURE_START", it).apply()
-                                }
-                            )
-                        }
+        MaterialTheme {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+            ) {
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize()
+                ) { page ->
+                    when (page) {
+                        0 -> MainControlScreen(
+                            statusText = statusText,
+                            isPhoneConnected = isPhoneConnected,
+                            isEspConnected = isEspConnected,
+                            isVehicleOn = isVehicleOn,
+                            isEngineStarting = isEngineStarting,
+                            onTogglePower = {
+                                val nextCmd = if (isVehicleOn) "0" else "1"
+                                onSendCommandWithAutoStart(nextCmd, scope)
+                            },
+                            onEngineStart = {
+                                triggerEngineStart()
+                            }
+                        )
+                        1 -> AdvancedScreen(
+                            isPhoneConnected = isPhoneConnected,
+                            isEspConnected = isEspConnected,
+                            vehicleName = vehicleNameOnWatch,
+                            distance = vehicleDistance,
+                            rssi = vehicleRssi,
+                            onSendCommand = { onSendCommandWithAutoStart(it, scope) }
+                        )
+                        2 -> SettingsScreen(
+                            isPhoneConnected = isPhoneConnected,
+                            isEspConnected = isEspConnected,
+                            isAutoStartEnabled = isAutoStartEnabled,
+                            isGestureEnabled = isGestureEnabled,
+                            onAutoStartToggle = {
+                                isAutoStartEnabled = it
+                                getSharedPreferences("WEAR_PREF", Context.MODE_PRIVATE).edit()
+                                    .putBoolean("AUTO_START", it).apply()
+                            },
+                            onGestureToggle = {
+                                isGestureEnabled = it
+                                getSharedPreferences("WEAR_PREF", Context.MODE_PRIVATE).edit()
+                                    .putBoolean("GESTURE_START", it).apply()
+                                registerSensorIfNeeded()
+                            }
+                        )
                     }
-                    
-                    HorizontalPageIndicator(
-                        pageIndicatorState = pageIndicatorState,
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp)
-                    )
                 }
+
+                HorizontalPageIndicator(
+                    pageIndicatorState = pageIndicatorState,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 6.dp)
+                )
             }
         }
     }
@@ -145,20 +189,61 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Sens
     override fun onResume() {
         super.onResume()
         Wearable.getDataClient(this).addListener(this)
+        Wearable.getMessageClient(this).addListener(this)
         registerSensorIfNeeded()
     }
 
     override fun onPause() {
         super.onPause()
         Wearable.getDataClient(this).removeListener(this)
+        Wearable.getMessageClient(this).removeListener(this)
         unregisterSensor()
     }
 
+    override fun onMessageReceived(messageEvent: MessageEvent) {
+        if (messageEvent.path == "/status_direct" || messageEvent.path == "/status") {
+            try {
+                val payload = String(messageEvent.data, Charsets.UTF_8)
+                val parts = payload.split("|")
+                if (parts.size >= 5) {
+                    val newIsEspConnected = parts[0].toBoolean()
+                    val newIsVehicleOn = parts[1].toBoolean()
+                    val newDistance = parts[2].toFloatOrNull() ?: -1f
+                    val newRssi = parts[3].toIntOrNull() ?: 0
+                    val newVehicleName = parts[4]
+
+                    isEspConnected = newIsEspConnected
+                    isVehicleOn = newIsVehicleOn
+                    vehicleDistance = newDistance
+                    vehicleRssi = newRssi
+                    if (newVehicleName.isNotBlank()) {
+                        vehicleNameOnWatch = newVehicleName
+                    }
+                    statusText = if (isEspConnected) {
+                        if (isVehicleOn) "XE ĐANG BẬT" else "XE ĐÃ SẴN SÀNG"
+                    } else {
+                        "CHƯA KẾT NỐI XE"
+                    }
+                    registerSensorIfNeeded()
+                    Log.d(TAG, "Direct status received: ESP=$isEspConnected, ON=$isVehicleOn, Dist=$vehicleDistance, Rssi=$vehicleRssi")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error parsing status message", e)
+            }
+        }
+    }
+
     private fun registerSensorIfNeeded() {
-        if (isGestureEnabled && isVehicleOn && engineStartCount < 2) {
-            accelSensor?.let {
-                sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
-                Log.d("WEAR_GESTURE", "Sensor registered")
+        if (isGestureEnabled) {
+            val sensor = accelSensor ?: (sensorManager?.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
+                ?: sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER))
+            accelSensor = sensor
+            if (sensor != null) {
+                sensorManager?.unregisterListener(this)
+                val registered = sensorManager?.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME) ?: false
+                Log.d(TAG, "Registered sensor for pinch: ${sensor.name}, ok=$registered")
+            } else {
+                Log.w(TAG, "No motion sensor available on watch!")
             }
         } else {
             unregisterSensor()
@@ -167,52 +252,88 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Sens
 
     private fun unregisterSensor() {
         sensorManager?.unregisterListener(this)
-        Log.d("WEAR_GESTURE", "Sensor unregistered")
+        isFirstSample = true
+        Log.d(TAG, "Sensor unregistered")
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
-        if (!isGestureEnabled || !isVehicleOn || isEngineStarting || event?.sensor?.type != Sensor.TYPE_LINEAR_ACCELERATION) return
+        if (!isGestureEnabled || isEngineStarting || event == null) return
 
         val x = event.values[0]
         val y = event.values[1]
         val z = event.values[2]
-        val magnitude = Math.sqrt((x * x + y * y + z * z).toDouble())
 
-        // Ngưỡng phát hiện búng tay (Pinch) - Độ nhạy 18-20 m/s^2
-        if (magnitude > 18.0) {
+        val magnitude: Double
+        val threshold: Double
+
+        if (event.sensor.type == Sensor.TYPE_LINEAR_ACCELERATION) {
+            // Gia tốc tuyến tính đã khử trọng lực
+            magnitude = Math.sqrt((x * x + y * y + z * z).toDouble())
+            threshold = 12.0 // Ngưỡng nhạy tối ưu cho cử chỉ búng tay
+        } else {
+            // Cảm biến gia tốc chuẩn: Tính delta biến thiên (jerk)
+            if (isFirstSample) {
+                lastX = x; lastY = y; lastZ = z
+                isFirstSample = false
+                return
+            }
+            val dx = x - lastX
+            val dy = y - lastY
+            val dz = z - lastZ
+            lastX = x; lastY = y; lastZ = z
+            magnitude = Math.sqrt((dx * dx + dy * dy + dz * dz).toDouble())
+            threshold = 9.0 // Ngưỡng jerk phát hiện giật cổ tay/búng tay
+        }
+
+        if (magnitude > threshold) {
             val currentTime = System.currentTimeMillis()
-            if (currentTime - lastGestureTime > 2000) { // Cooldown 2s
+            if (currentTime - lastGestureTime > 1500) { // Cooldown 1.5s
                 lastGestureTime = currentTime
-                Log.d("WEAR_GESTURE", "Pinch detected! Magnitude: $magnitude")
-                // Kích hoạt ĐỀ MÁY (Lệnh 2)
-                triggerEngineStart()
+                Log.d(TAG, "⚡ BÚNG TAY THÀNH CÔNG! Mag: $magnitude | VehicleOn: $isVehicleOn")
+
+                triggerWatchVibration()
+
+                if (isVehicleOn) {
+                    // Xe đang bật điện -> Búng tay đề nổ máy (Lệnh "2")
+                    triggerEngineStart()
+                } else {
+                    // Xe đang tắt -> Búng tay mở khóa điện (Lệnh "1")
+                    Log.d(TAG, "Búng tay bật xe (Lệnh 1)")
+                    sendCommandToPhone("1")
+                }
             }
         }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
+    private fun triggerWatchVibration() {
+        try {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vm = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                vm?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator?.vibrate(VibrationEffect.createOneShot(120, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator?.vibrate(120)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Vibration error", e)
+        }
+    }
+
     private fun triggerEngineStart() {
-        // Hàm này sẽ được gọi từ Sensor hoặc Long Click
         if (!isEngineStarting && isVehicleOn) {
-            if (engineStartCount >= 2) {
-                Log.w("WEAR_GESTURE", "Limit reached. Killing sensor.")
-                unregisterSensor() // Tắt ngay lập tức để tiết kiệm pin
-                return
-            }
-
             isEngineStarting = true
-            engineStartCount++
-            Log.d("WEAR_GESTURE", "Triggering engine start. Count: $engineStartCount")
-            
-            // Nếu đây là lần thứ 2, tắt sensor ngay sau lệnh này
-            if (engineStartCount >= 2) {
-                Log.d("WEAR_GESTURE", "2nd start successful. Sensor unregistered.")
-                unregisterSensor()
-            }
-
+            Log.d(TAG, "Triggering engine start via gesture / long-click")
             sendCommandToPhone("2")
-            
+
             // Hiệu ứng visual 2s
             MainScope().launch {
                 delay(2000)
@@ -227,23 +348,29 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Sens
                 val dataMap = DataMapItem.fromDataItem(event.dataItem).dataMap
                 val newIsEspConnected = dataMap.getBoolean("esp_connected", false)
                 val newIsVehicleOn = dataMap.getBoolean("power_on", false)
-
-                // Reset số lần đề khi xe thay đổi trạng thái (Tắt đi bật lại)
-                if (newIsVehicleOn != isVehicleOn) {
-                    engineStartCount = 0
-                }
+                val newDistance = dataMap.getFloat("distance", -1f)
+                val newRssi = dataMap.getInt("rssi", 0)
+                val newVehicleName = dataMap.getString("vehicle_name", "")
 
                 isEspConnected = newIsEspConnected
                 isVehicleOn = newIsVehicleOn
-                statusText = if (isEspConnected) "XE ĐÃ SẴN SÀNG" else "CHƯA KẾT NỐI XE"
-                
-                // Cập nhật lại sensor khi trạng thái xe thay đổi
+                vehicleDistance = newDistance
+                vehicleRssi = newRssi
+                if (newVehicleName.isNotBlank()) {
+                    vehicleNameOnWatch = newVehicleName
+                }
+                statusText = if (isEspConnected) {
+                    if (isVehicleOn) "XE ĐANG BẬT" else "XE ĐÃ SẴN SÀNG"
+                } else {
+                    "CHƯA KẾT NỐI XE"
+                }
+
                 registerSensorIfNeeded()
             }
         }
     }
 
-    private fun onSendCommandWithAutoStart(cmd: String, scope: kotlinx.coroutines.CoroutineScope) {
+    private fun onSendCommandWithAutoStart(cmd: String, scope: CoroutineScope) {
         if (cmd == "2") {
             isEngineStarting = true
             scope.launch {
@@ -251,12 +378,13 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Sens
                 isEngineStarting = false
             }
         }
-        
+
         sendCommandToPhone(cmd)
-        // Nếu bật "Tự động đề" và lệnh là "Bật xe" (1)
+
+        // Nếu bật "Tự động đề" và lệnh gửi là "Bật xe" (1)
         if (isAutoStartEnabled && cmd == "1") {
             scope.launch {
-                delay(3000) // Đợi 3s rồi đề máy
+                delay(3000) // Đợi 3s sau khi bật ACC rồi tự đề nổ
                 isEngineStarting = true
                 sendCommandToPhone("2")
                 delay(2000)
@@ -266,51 +394,50 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Sens
     }
 
     private fun sendCommandToPhone(data: String, path: String = "/command") {
-        Log.d("WEAR_BRIDGE", "Attempting to send to $path: $data")
-        
-        // Sử dụng CapabilityClient để tìm đúng thiết bị có khả năng điều khiển ESP32
-        Wearable.getCapabilityClient(this)
-            .getCapability("esp32_control", CapabilityClient.FILTER_REACHABLE)
-            .addOnSuccessListener { capabilityInfo ->
-                val nodes = capabilityInfo.nodes
-                Log.d("WEAR_BRIDGE", "Capability nodes found: ${nodes.size}")
-                
-                if (nodes.isEmpty()) {
-                    Log.w("WEAR_BRIDGE", "No nodes with 'esp32_control' capability. Falling back to all nodes.")
-                    fallbackSendAllNodes(path, data)
-                } else {
+        Log.d(TAG, "Attempting to send to $path: $data")
+
+        Wearable.getNodeClient(this).connectedNodes
+            .addOnSuccessListener { nodes ->
+                Log.d(TAG, "Connected nodes: ${nodes.size}")
+                if (nodes.isNotEmpty()) {
                     for (node in nodes) {
                         sendMessageToNode(node.id, node.displayName, path, data)
                     }
+                } else {
+                    fallbackSendCapability(path, data)
                 }
             }
             .addOnFailureListener { e ->
-                Log.e("WEAR_BRIDGE", "Failed to get capabilities", e)
-                fallbackSendAllNodes(path, data)
+                Log.w(TAG, "Failed getting connected nodes, fallback to capabilities", e)
+                fallbackSendCapability(path, data)
             }
     }
 
-    private fun fallbackSendAllNodes(path: String, data: String) {
-        Wearable.getNodeClient(this).connectedNodes.addOnSuccessListener { nodes ->
-            Log.d("WEAR_BRIDGE", "Fallback connected nodes: ${nodes.size}")
-            for (node in nodes) {
-                sendMessageToNode(node.id, node.displayName, path, data)
+    private fun fallbackSendCapability(path: String, data: String) {
+        Wearable.getCapabilityClient(this)
+            .getCapability("esp32_control", CapabilityClient.FILTER_REACHABLE)
+            .addOnSuccessListener { capabilityInfo ->
+                for (node in capabilityInfo.nodes) {
+                    sendMessageToNode(node.id, node.displayName, path, data)
+                }
             }
-        }
     }
 
     private fun sendMessageToNode(nodeId: String, displayName: String, path: String, data: String) {
-        Log.d("WEAR_BRIDGE", "Sending to node: $displayName ($nodeId) | Path: $path")
+        Log.d(TAG, "Sending to node: $displayName ($nodeId) | Path: $path")
         Wearable.getMessageClient(this).sendMessage(nodeId, path, data.toByteArray())
-            .addOnSuccessListener { 
-                Log.d("WEAR_BRIDGE", "Success: Sent $data to $displayName via $path")
+            .addOnSuccessListener {
+                Log.d(TAG, "Success: Sent $data to $displayName via $path")
             }
-            .addOnFailureListener { e -> 
-                Log.e("WEAR_BRIDGE", "Failed to send $data to $displayName", e)
+            .addOnFailureListener { e ->
+                Log.e(TAG, "Failed to send $data to $displayName", e)
             }
     }
 }
 
+// =========================================================================
+// TAB 1: MÀN HÌNH ĐIỀU KHIỂN CHÍNH (NÚT TRÒN TRUNG TÂM BẬT/TẮT/ĐỀ MÁY)
+// =========================================================================
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MainControlScreen(
@@ -319,117 +446,245 @@ fun MainControlScreen(
     isEspConnected: Boolean,
     isVehicleOn: Boolean,
     isEngineStarting: Boolean,
-    onSendCommand: (String) -> Unit,
-    onLongClick: () -> Unit
+    onTogglePower: () -> Unit,
+    onEngineStart: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
-    val focusRequester = remember { FocusRequester() }
-    
-    // Tự động yêu cầu focus khi màn hình hiển thị để hỗ trợ cử chỉ hệ thống
-    LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
-    }
 
     val bgColor by animateColorAsState(
         targetValue = when {
             isEngineStarting -> Color(0xFF331F00) // Màu nâu cam khi đề
             !isPhoneConnected || !isEspConnected -> Color.Black
-            isVehicleOn -> Color(0xFF330804)
-            else -> Color(0xFF021633)
-        }, label = "bg"
+            isVehicleOn -> Color(0xFF330804) // Màu đỏ rượu khi bật điện
+            else -> Color(0xFF021633) // Xanh dương thẫm khi khóa an toàn
+        },
+        label = "bg"
     )
+
     val glowColor by animateColorAsState(
         targetValue = when {
-            isEngineStarting -> Color(0xFFFFD600) // Vàng khi đề
+            isEngineStarting -> Color(0xFFFFD600) // Vàng Neon khi đề
             !isPhoneConnected || !isEspConnected -> Color.Transparent
-            isVehicleOn -> Color(0xFFFF3B30)
-            else -> Color(0xFF007AFF)
-        }, label = "glow"
+            isVehicleOn -> Color(0xFFFF3B30) // Đỏ Neon khi bật
+            else -> Color(0xFF007AFF) // Xanh Neon khi sẵn sàng
+        },
+        label = "glow"
     )
 
-    Box(modifier = Modifier.fillMaxSize().background(bgColor), contentAlignment = Alignment.Center) {
-        Box(modifier = Modifier.fillMaxSize().background(
-            Brush.radialGradient(listOf(glowColor.copy(alpha = 0.5f), Color.Transparent), radius = 400f)
-        ))
-
-        // SỬ DỤNG BUTTON CHUẨN ĐỂ SAMSUNG NHẬN DIỆN DOUBLE PINCH
-        Button(
-            onClick = {
-                Log.d("WEAR_GESTURE", "System Double Pinch Detected!")
-                if (isPhoneConnected) {
-                    onSendCommand(if (isVehicleOn) "0" else "1")
-                }
-            },
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(bgColor),
+        contentAlignment = Alignment.Center
+    ) {
+        // Vòng phát sáng Gradient hướng tâm
+        Box(
             modifier = Modifier
-                .size(160.dp)
-                .focusRequester(focusRequester)
-                .focusable()
-                .semantics {
-                    role = Role.Button
-                    contentDescription = if (isVehicleOn) "Tắt xe" else "Bật xe"
-                    // Gán hành động click rõ ràng vào Semantics cho Wear OS 5
-                    onClick(label = "Kích hoạt hành động chính") {
-                        if (isPhoneConnected) {
-                            onSendCommand(if (isVehicleOn) "0" else "1")
-                            true
-                        } else false
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        listOf(glowColor.copy(alpha = 0.5f), Color.Transparent),
+                        radius = 420f
+                    )
+                )
+        )
+
+        // NÚT ĐIỀU KHIỂN CHÍNH DUY NHẤT: BẬT / TẮT (Chạm) & ĐỀ NỔ (Giữ)
+        Box(
+            modifier = Modifier
+                .size(152.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF141416).copy(alpha = 0.85f))
+                .combinedClickable(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onTogglePower()
+                    },
+                    onLongClick = {
+                        if (isVehicleOn) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onEngineStart()
+                        }
                     }
-                },
-            colors = ButtonDefaults.buttonColors(
-                backgroundColor = Color.Transparent,
-                contentColor = Color.White
-            ),
-            shape = CircleShape
+                ),
+            contentAlignment = Alignment.Center
         ) {
-            // Lớp xử lý Chạm (Touch) và Nhấn giữ (Long Click) vật lý
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = if (isEngineStarting) "ĐANG ĐỀ MÁY..." else statusText,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = when {
+                        isEngineStarting -> Color(0xFFFFD600)
+                        isEspConnected -> Color(0xFF34C759)
+                        else -> Color(0xFF9E9E9E)
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Icon(
+                    painter = painterResource(id = if (isEngineStarting) R.drawable.ic_engine else R.drawable.ic_power),
+                    contentDescription = if (isVehicleOn) "Tắt xe" else "Bật xe",
+                    modifier = Modifier.size(76.dp),
+                    tint = when {
+                        isEngineStarting -> Color(0xFFFFD600)
+                        isVehicleOn -> Color(0xFFFF3B30)
+                        isEspConnected -> Color(0xFF007AFF)
+                        else -> Color.White.copy(alpha = 0.6f)
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = when {
+                        isEngineStarting -> "VUI LÒNG ĐỢI"
+                        isVehicleOn -> "CHẠM: TẮT • GIỮ: ĐỀ"
+                        else -> "CHẠM ĐỂ BẬT XE"
+                    },
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White.copy(alpha = 0.75f)
+                )
+            }
+        }
+    }
+}
+
+// =========================================================================
+// TAB 2: MÀN HÌNH TÌM XE & RADAR HIỂN THỊ KHOẢNG CÁCH THỰC TẾ
+// =========================================================================
+@Composable
+fun AdvancedScreen(
+    isPhoneConnected: Boolean,
+    isEspConnected: Boolean,
+    vehicleName: String,
+    distance: Float,
+    rssi: Int,
+    onSendCommand: (String) -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+    val scrollState = rememberScalingLazyListState()
+
+    ScalingLazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+        state = scrollState,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        item {
+            Text(
+                text = "RADAR TÌM XE",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFFFFD600), // Gold
+                letterSpacing = 1.sp
+            )
+        }
+
+        item {
+            Text(
+                text = vehicleName,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 1
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+        }
+
+        // Card hiển thị khoảng cách và tín hiệu RSSI
+        item {
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .combinedClickable(
-                        onClick = {
-                            Log.d("WEAR_GESTURE", "Manual Touch Detected")
-                            if (isPhoneConnected) {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onSendCommand(if (isVehicleOn) "0" else "1")
-                            }
-                        },
-                        onLongClick = {
-                            Log.d("WEAR_GESTURE", "Manual Long Click Detected")
-                            if (isPhoneConnected && isVehicleOn) {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onLongClick()
-                            }
-                        }
-                    ),
+                    .fillMaxWidth(0.92f)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFF161618))
+                    .padding(vertical = 8.dp, horizontal = 12.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (isEspConnected && distance > 0f) {
+                        Text(
+                            text = String.format(Locale.US, "%.1f m", distance),
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF34C759) // Emerald Green
+                        )
+                        Text(
+                            text = "Tín hiệu: $rssi dBm",
+                            fontSize = 10.sp,
+                            color = Color(0xFF9E9E9E)
+                        )
+                    } else if (!isPhoneConnected) {
+                        Text(
+                            text = "-- m",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF9E9E9E)
+                        )
+                        Text(
+                            text = "Mất kết nối ĐT",
+                            fontSize = 10.sp,
+                            color = Color(0xFFFF3B30)
+                        )
+                    } else {
+                        Text(
+                            text = "-- m",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF9E9E9E)
+                        )
+                        Text(
+                            text = "Chưa kết nối xe",
+                            fontSize = 10.sp,
+                            color = Color(0xFFFFCC00)
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        // Nút Tìm xe kích hoạt còi và xi-nhan (Lệnh "3")
+        item {
+            Button(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    if (isPhoneConnected) {
+                        onSendCommand("3")
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth(0.92f)
+                    .height(44.dp),
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = Color(0xFFE5A919), // Gold Amber
+                    contentColor = Color.Black
+                ),
+                shape = RoundedCornerShape(22.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_auto),
+                        contentDescription = "Tìm xe",
+                        modifier = Modifier.size(20.dp),
+                        tint = Color.Black
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (isEngineStarting) "ĐANG ĐỀ MÁY..." else statusText,
+                        text = "TÌM XE (CÒI/ĐÈN)",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = when {
-                            isEngineStarting -> Color(0xFFFFD600)
-                            isEspConnected -> Color(0xFF34C759)
-                            else -> Color(0xFF9E9E9E)
-                        }
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Icon(
-                        painter = painterResource(id = if (isEngineStarting) R.drawable.ic_engine else R.drawable.ic_power),
-                        contentDescription = null,
-                        modifier = Modifier.size(80.dp),
-                        tint = Color.White
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = when {
-                            isEngineStarting -> "VUI LÒNG ĐỢI"
-                            isVehicleOn -> "GIỮ ĐỀ MÁY"
-                            else -> "BẬT XE"
-                        },
-                        fontSize = 10.sp,
-                        color = Color.White.copy(alpha = 0.7f)
+                        color = Color.Black
                     )
                 }
             }
@@ -437,36 +692,9 @@ fun MainControlScreen(
     }
 }
 
-@Composable
-fun AdvancedScreen(isPhoneConnected: Boolean, isEspConnected: Boolean, onSendCommand: (String) -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().background(Color.Black).padding(20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text("TÍNH NĂNG KHÁC", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-        Spacer(modifier = Modifier.height(20.dp))
-        Button(
-            onClick = { 
-                if (isPhoneConnected) {
-                    onSendCommand("3")
-                } else {
-                    // Toast will be shown by sendCommandToPhone if nodes is empty, 
-                    // but here we can add extra check if needed.
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF1C1C1E))
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(painter = painterResource(id = R.drawable.ic_auto), contentDescription = null, modifier = Modifier.size(24.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("TÌM XE / AUTO")
-            }
-        }
-    }
-}
-
+// =========================================================================
+// TAB 3: MÀN HÌNH CÀI ĐẶT & TRẠNG THÁI HỆ THỐNG
+// =========================================================================
 @Composable
 fun SettingsScreen(
     isPhoneConnected: Boolean,
@@ -479,20 +707,22 @@ fun SettingsScreen(
     val scrollState = rememberScalingLazyListState()
 
     ScalingLazyColumn(
-        modifier = Modifier.fillMaxSize().background(Color.Black),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
         state = scrollState,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         item {
             Text(
                 "CÀI ĐẶT & STATUS",
-                modifier = Modifier.padding(bottom = 8.dp),
+                modifier = Modifier.padding(bottom = 6.dp),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White
             )
         }
-        
+
         item {
             ToggleSettingItem(
                 label = "Tự động đề máy",
@@ -509,15 +739,15 @@ fun SettingsScreen(
             )
         }
 
-        item { Spacer(modifier = Modifier.height(8.dp)) }
-        
+        item { Spacer(modifier = Modifier.height(6.dp)) }
+
         item { StatusItem("Điện thoại", isPhoneConnected) }
         item { StatusItem("Xe (tsmart)", isEspConnected) }
-        
+
         item {
             Text(
-                "Version 1.5.0",
-                modifier = Modifier.padding(top = 8.dp),
+                "Version 1.6.0",
+                modifier = Modifier.padding(top = 6.dp),
                 fontSize = 9.sp,
                 color = Color.Gray
             )
@@ -534,13 +764,12 @@ fun ToggleSettingItem(label: String, checked: Boolean, onCheckedChange: (Boolean
         toggleControl = {
             Checkbox(
                 checked = checked,
-                enabled = true,
-                modifier = Modifier.semantics {
-                    this.contentDescription = if (checked) "Đã chọn" else "Chưa chọn"
-                }
+                enabled = true
             )
         },
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp),
         colors = ToggleChipDefaults.toggleChipColors(
             checkedStartBackgroundColor = Color(0xFF1C1C1E),
             checkedEndBackgroundColor = Color(0xFF1C1C1E),
@@ -552,8 +781,18 @@ fun ToggleSettingItem(label: String, checked: Boolean, onCheckedChange: (Boolean
 
 @Composable
 fun StatusItem(label: String, connected: Boolean) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth(0.9f)
+            .padding(vertical = 3.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
         Text(label, fontSize = 10.sp, color = Color.White)
-        Text(if (connected) "OK" else "LỖI", fontSize = 10.sp, color = if (connected) Color.Green else Color.Red)
+        Text(
+            if (connected) "OK" else "LỖI",
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (connected) Color(0xFF34C759) else Color(0xFFFF3B30)
+        )
     }
 }

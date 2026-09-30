@@ -9,7 +9,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.control_esp.wear"
+        applicationId = "com.example.control_esp"
         minSdk = 30
         targetSdk = 35
         versionCode = 1

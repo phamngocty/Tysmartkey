@@ -43,6 +43,7 @@ const char* VERSION_CHECK_URL = "http://192.168.1.114:3002/api/v1/repos/nas152/T
 #define OTA_DATA_UUID       "0000ff03-0000-1000-8000-00805f9b34fb"
 
 String SECRET_KEY = "271000"; // Mã bảo mật mặc định
+String vehicleName = DEVICE_NAME; // Tên riêng của xe lưu trong Flash NVS
 bool isUnlocked = false;       // Trạng thái xe (true: Đang mở khóa, false: Đang khóa)
 bool antiTheftEnabled = false; // Trạng thái tính năng Báo động chống dắt rung lắc (SW-420)
 volatile bool isEnrolling = false;          // Cờ đang trong chế độ thêm vân tay
@@ -321,6 +322,29 @@ bool syncUartHeader(unsigned long timeoutMs = 2000) {
                 return true;
             }
             prev = cur;
+        }
+    }
+    return false;
+}
+
+// Khóa đồng bộ chính xác chuỗi Header 6-byte của giao thức Synochip (EF 01 FF FF FF FF) cho luồng dữ liệu ảnh
+bool syncUartPacketHeader6B(unsigned long timeoutMs = 2000) {
+    unsigned long start = millis();
+    uint8_t syncBuf[6] = {0};
+    while (millis() - start < timeoutMs) {
+        uint8_t cur = 0;
+        if (readUartByte(&cur, 100)) {
+            syncBuf[0] = syncBuf[1];
+            syncBuf[1] = syncBuf[2];
+            syncBuf[2] = syncBuf[3];
+            syncBuf[3] = syncBuf[4];
+            syncBuf[4] = syncBuf[5];
+            syncBuf[5] = cur;
+            if (syncBuf[0] == 0xEF && syncBuf[1] == 0x01 &&
+                syncBuf[2] == 0xFF && syncBuf[3] == 0xFF &&
+                syncBuf[4] == 0xFF && syncBuf[5] == 0xFF) {
+                return true;
+            }
         }
     }
     return false;
@@ -939,7 +963,6 @@ bool streamR503ImageOverBle() {
 
     // 1. Cấp phát bộ nhớ đệm RAM (32KB) TRƯỚC KHI gửi lệnh UpImage (tránh trễ nhịp UART)
     const size_t MAX_IMG_BYTES = 32768;
-    const size_t TOTAL_IMAGE_BYTES = 18432; // Chuẩn 192x192 pixels (2 pixels/byte) = 18.432 bytes
     uint8_t *imgBuffer = (uint8_t *)malloc(MAX_IMG_BYTES);
     if (!imgBuffer) {
         Serial.println("❌ Không đủ RAM để đệm ảnh vân tay!");
@@ -953,7 +976,7 @@ bool streamR503ImageOverBle() {
     // Gửi lệnh UpImage (0x0A) qua packet engine
     sendCommandPacket(R503_CMD_UP_IMAGE, nullptr, 0);
 
-    // Chờ gói tin ACK phản hồi UpImage
+    // Chờ gói tin ACK phản hồi UpImage (12 bytes)
     uint8_t ackCode = 0xFF;
     if (!receiveAckPacket(ackCode, nullptr, nullptr, 2500) || ackCode != 0x00) {
         Serial.printf("❌ R503 từ chối gửi ảnh: %s\n", r503GetStatusString(ackCode));
@@ -962,41 +985,41 @@ bool streamR503ImageOverBle() {
         return false;
     }
 
-    // PHA 1: THU THẬP TẤT CẢ GÓI DỮ LIỆU TỪ UART VÀO RAM LIÊN TỤC VỚI XÁC THỰC CHECKSUM
+    // PHA 1: THU THẬP TẤT CẢ GÓI DỮ LIỆU TỪ UART VÀO RAM VỚI KHÓA HEADER 6-BYTE & CHECKSUM
     size_t totalBytesReceived = 0;
     bool finished = false;
     unsigned long startStream = millis();
     int packetIndex = 0;
 
-    while (!finished && (totalBytesReceived < TOTAL_IMAGE_BYTES) && (millis() - startStream < 9000)) {
+    while (!finished && (totalBytesReceived < MAX_IMG_BYTES) && (millis() - startStream < 15000)) {
         if (cancelEnrollRequested) {
             free(imgBuffer);
             notifyStatus("FP_IMG_ERR");
             return false;
         }
 
-        // 1. Đồng bộ Header 0xEF 0x01 cho từng gói tin (chống trôi byte và lệch pha 100%)
-        if (!syncUartHeader(1500)) {
-            Serial.printf("⏱️ Timeout tìm Header gói #%d (đã nhận %u bytes)\n", packetIndex, totalBytesReceived);
+        // 1. Đồng bộ Header 6-byte 0xEF 0x01 0xFF 0xFF 0xFF 0xFF (chống trôi byte và tuyệt đối không bắt nhầm trong ảnh)
+        if (!syncUartPacketHeader6B(2000)) {
+            Serial.printf("⏱️ Timeout tìm Header 6-byte gói #%d (đã nhận %u bytes)\n", packetIndex, totalBytesReceived);
             break;
         }
 
-        // 2. Đọc 7 bytes còn lại của Header: Addr (4) + PID (1) + Length (2)
-        uint8_t hdr[7];
-        if (!readUartBytes(hdr, 7, 800)) {
-            Serial.printf("❌ Lỗi đọc 7 bytes Header gói #%d\n", packetIndex);
+        // 2. Đọc 3 bytes Meta của Header: PID (1 byte) + Length (2 bytes)
+        uint8_t meta[3];
+        if (!readUartBytes(meta, 3, 800)) {
+            Serial.printf("❌ Lỗi đọc 3 bytes Meta gói #%d\n", packetIndex);
             break;
         }
 
-        uint8_t pid = hdr[4]; // 0x02 = Data, 0x08 = EndData
-        uint16_t length = ((uint16_t)hdr[5] << 8) | hdr[6];
+        uint8_t pid = meta[0]; // 0x02 = Data, 0x08 = EndData
+        uint16_t length = ((uint16_t)meta[1] << 8) | meta[2];
 
         if (length < 2 || length > 300) {
             Serial.printf("⚠️ Chiều dài gói #%d bất thường (%d), ngắt luồng an toàn!\n", packetIndex, length);
             break;
         }
 
-        uint16_t payloadLen = length - 2; // Trừ đi 2 bytes checksum
+        uint16_t payloadLen = length - 2; // Trừ đi 2 bytes checksum (mặc định 128 bytes)
 
         // 3. Đọc Payload ảnh trực tiếp vào RAM buffer
         if (totalBytesReceived + payloadLen > MAX_IMG_BYTES) {
@@ -1029,7 +1052,7 @@ bool streamR503ImageOverBle() {
         totalBytesReceived += payloadLen;
         packetIndex++;
 
-        if (pid == R503_PID_END_DATA || totalBytesReceived >= TOTAL_IMAGE_BYTES) {
+        if (pid == R503_PID_END_DATA) {
             finished = true;
             break;
         }
@@ -1044,13 +1067,48 @@ bool streamR503ImageOverBle() {
         return false;
     }
 
+    // Tự động nhận diện độ phân giải ma trận ảnh dựa trên số byte thực tế:
+    // - R503 Tròn (100 gói x 128B = 12.800 bytes nén = 25.600 pixel): 160 x 160
+    // - R503 Vuông (144 gói x 128B = 18.432 bytes nén = 36.864 pixel): 192 x 192
+    // - R307/ZFM20 (234 gói x 128B = 29.952 bytes nén = 59.904 pixel): 208 x 288
+    uint16_t imgWidth = 160;
+    uint16_t imgHeight = 160;
+    uint32_t totalPixels = (uint32_t)totalBytesReceived * 2;
+
+    if (totalBytesReceived == 12800) {
+        imgWidth = 160;
+        imgHeight = 160;
+    } else if (totalBytesReceived == 18432) {
+        imgWidth = 192;
+        imgHeight = 192;
+    } else if (totalBytesReceived == 29952) {
+        imgWidth = 208;
+        imgHeight = 288;
+    } else {
+        uint16_t side = (uint16_t)round(sqrt(totalPixels));
+        if ((uint32_t)side * side == totalPixels) {
+            imgWidth = side;
+            imgHeight = side;
+        } else if (totalPixels % 160 == 0) {
+            imgWidth = 160;
+            imgHeight = totalPixels / 160;
+        } else if (totalPixels % 192 == 0) {
+            imgWidth = 192;
+            imgHeight = totalPixels / 192;
+        } else {
+            imgWidth = 160;
+            imgHeight = totalPixels / 160;
+        }
+    }
+
+    Serial.printf("📊 [MA TRẬN ẢNH]: %d x %d px (%u điểm ảnh)\n", imgWidth, imgHeight, totalPixels);
+
     // PHA 2: TRUYỀN DỮ LIỆU ĐÃ ĐỆM TRONG RAM QUA BLE THEO TỪNG CHUNK CÓ INDEX ĐỘC LẬP
     const size_t CHUNK_SIZE = 96; // 96 bytes thô -> 128 Base64 chars (bội số của 3, không padding '=')
-    const int TOTAL_EXPECTED_CHUNKS = 192; // 18432 bytes / 96 = 192 chunks chuẩn cho lăng kính 192x192
     int totalChunks = (totalBytesReceived + CHUNK_SIZE - 1) / CHUNK_SIZE;
-    if (totalChunks < TOTAL_EXPECTED_CHUNKS) totalChunks = TOTAL_EXPECTED_CHUNKS;
 
-    notifyStatus("FP_IMG_START|192|192|" + String(totalChunks));
+    // Phát sóng tin nhắn khởi đầu với kích thước thực tế: FP_IMG_START|<width>|<height>|<totalChunks>
+    notifyStatus("FP_IMG_START|" + String(imgWidth) + "|" + String(imgHeight) + "|" + String(totalChunks));
     vTaskDelay(pdMS_TO_TICKS(50));
 
     unsigned char base64Buf[256];
@@ -1970,6 +2028,22 @@ void processIncomingCommand(String data) {
         notifyStatus("DA_DOI_KEY");
         beep(2, 100);
     }
+    else if (cmd == "SET_NAME" || cmd == "SET_VEHICLE_NAME") { // Đổi tên riêng của xe
+        String newName = params;
+        newName.trim();
+        if (newName.length() > 0 && newName.length() <= 32) {
+            vehicleName = newName;
+            prefsSecurity.putString("vehicle_name", vehicleName);
+            Serial.printf("🏍️ [NAME] Đã lưu tên xe mới vào Flash NVS: %s\n", vehicleName.c_str());
+            notifyStatus("VEHICLE_NAME|" + vehicleName);
+            beep(2, 60);
+        } else {
+            notifyStatus("ERR_NAME_INVALID");
+        }
+    }
+    else if (cmd == "GET_NAME" || cmd == "GET_VEHICLE_NAME") {
+        notifyStatus("VEHICLE_NAME|" + vehicleName);
+    }
     else if (cmd == "UNPAIR_ALL") { // Xóa toàn bộ danh sách Bonding
         Serial.println("🛡️ Yêu cầu thu hồi & xóa sạch toàn bộ thiết bị đã Bonding (Unpair All)...");
         NimBLEDevice::deleteAllBonds();
@@ -2485,6 +2559,8 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         sendFingerprintConfig();
         delay(40);
         sendLedConfigResponse();
+        delay(40);
+        notifyStatus("VEHICLE_NAME|" + vehicleName);
     }
 
     uint32_t onPassKeyRequest() override {
@@ -2655,6 +2731,8 @@ void setup() {
     Serial.printf("🔋 Cân chỉnh ADC Ắc quy: Hệ số = %.5f | Điện áp hiện tại = %.2fV\n", batteryVoltageCalib, readBatteryVoltage());
 
     SECRET_KEY = prefsSecurity.getString("master_key", "271000");
+    vehicleName = prefsSecurity.getString("vehicle_name", DEVICE_NAME);
+    Serial.printf("🏍️ Tên xe (Vehicle Name): %s\n", vehicleName.c_str());
     isUnlocked = prefsSecurity.getBool("is_unlocked", false);
     antiTheftEnabled = prefsSecurity.getBool("anti_theft", false);
     Serial.printf("🛡️ Chống dắt (Anti-Theft): %s (GPIO 4 Active HIGH)\n", antiTheftEnabled ? "BẬT" : "TẮT");
@@ -2732,7 +2810,7 @@ void setup() {
     }
 
     // 4. Khởi tạo NimBLE Server & Cấu hình SMP Security (Pairing, Bonding, Passkey AES-128)
-    NimBLEDevice::init(DEVICE_NAME);
+    NimBLEDevice::init(vehicleName.c_str());
     NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Mức phát sóng BLE tối đa
     NimBLEDevice::setMTU(517);              // Đặt MTU tối đa để tránh cắt cụt gói tin BLE payload
 

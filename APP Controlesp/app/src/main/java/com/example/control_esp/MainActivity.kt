@@ -73,8 +73,12 @@ class MainActivity : AppCompatActivity() {
     // Radar Finder Tab 2 references
     private var tvFinderDistance: TextView? = null
     private var tvFinderRssiDesc: TextView? = null
+    private var currentEstimatedDistance: Float = -1.0f
+    private var currentBleRssi: Int = 0
     private var cbAutoStartTab2: androidx.appcompat.widget.SwitchCompat? = null
     private var cbAutoConnectTab2: androidx.appcompat.widget.SwitchCompat? = null
+    private var cbBackgroundRunTab2: androidx.appcompat.widget.SwitchCompat? = null
+    private var isBackgroundServiceEnabled = true
 
     // Hero Action references
     private var btnStartHero: View? = null
@@ -116,9 +120,11 @@ class MainActivity : AppCompatActivity() {
     private var ivEnrollFingerprintImageRef: ImageView? = null
     private var enrollImageBuffer = StringBuilder()
     private val indexedImageChunks = java.util.concurrent.ConcurrentHashMap<Int, ByteArray>()
-    private var expectedTotalChunks: Int = 192
-    private var incomingImageWidth: Int = 192
-    private var incomingImageHeight: Int = 192
+    private var expectedTotalChunks: Int = 134
+    private var incomingImageWidth: Int = 160
+    private var incomingImageHeight: Int = 160
+    private var currentImageWidth: Int = 160
+    private var currentImageHeight: Int = 160
 
     // Quản lý Chế độ Chống Nước Mưa (Anti-Rain Mode)
     private var isRainEnabled = false
@@ -306,7 +312,27 @@ class MainActivity : AppCompatActivity() {
         val btnConnect = findViewById<Button>(R.id.btnUnlock)
         val btnToggle = findViewById<Button>(R.id.btnToggle)
         val tvStatus = findViewById<TextView>(R.id.tvStatus)
+        val header = findViewById<View>(R.id.header)
         val bottomNav = findViewById<BottomNavigationView>(R.id.bottom_navigation)
+
+        // Tính toán và áp dụng Status Bar Insets chống bị đồng hồ/tai thỏ/notch che tên xe
+        val density = resources.displayMetrics.density
+        var initialStatusBarHeight = 0
+        val statusBarResId = resources.getIdentifier("status_bar_height", "dimen", "android")
+        if (statusBarResId > 0) {
+            initialStatusBarHeight = resources.getDimensionPixelSize(statusBarResId)
+        }
+        val headerBaseTop = (12 * density).toInt()
+        val headerBaseBottom = (10 * density).toInt()
+        header.setPadding(header.paddingLeft, initialStatusBarHeight + headerBaseTop, header.paddingRight, headerBaseBottom)
+
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(header) { view, insets ->
+            val statusBars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.statusBars())
+            val topPad = if (statusBars.top > 0) statusBars.top else initialStatusBarHeight
+            view.setPadding(view.paddingLeft, topPad + headerBaseTop, view.paddingRight, headerBaseBottom)
+            insets
+        }
+
         androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(bottomNav) { view, insets ->
             val navInsets = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
             view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, navInsets.bottom)
@@ -336,12 +362,12 @@ class MainActivity : AppCompatActivity() {
         tvFindBadge = findViewById(R.id.tvFindBadge)
         ivFindIcon = findViewById(R.id.ivFindIcon)
 
-        // Header Actions (Khớp 100% Web Mockup)
+        // Header Actions (Khớp 100% Web Mockup & Hỗ trợ Đổi tên xe)
         viewConnectionDot = findViewById(R.id.viewConnectionDot)
         tvTitleRef = findViewById(R.id.tvTitle)
-        tvTitleRef?.setOnClickListener {
-            showRenameVehicleDialog()
-        }
+        tvTitleRef?.setOnClickListener { showRenameVehicleDialog() }
+        findViewById<View?>(R.id.llHeaderTitleContainer)?.setOnClickListener { showRenameVehicleDialog() }
+        findViewById<View?>(R.id.ivHeaderEditName)?.setOnClickListener { showRenameVehicleDialog() }
         findViewById<ImageButton>(R.id.btnHeaderHistory)?.setOnClickListener {
             showUnlockHistoryDialog()
         }
@@ -359,6 +385,7 @@ class MainActivity : AppCompatActivity() {
         tvFinderRssiDesc = findViewById(R.id.tvFinderRssiDesc)
         cbAutoStartTab2 = findViewById(R.id.cbAutoStartTab2)
         cbAutoConnectTab2 = findViewById(R.id.cbAutoConnectTab2)
+        cbBackgroundRunTab2 = findViewById(R.id.cbBackgroundRunTab2)
         findViewById<Button>(R.id.btnFindBikeTab2)?.setOnClickListener {
             handleFindVehicle()
         }
@@ -370,11 +397,17 @@ class MainActivity : AppCompatActivity() {
 
         val cbAutoConnect = findViewById<android.widget.CompoundButton>(R.id.cbAutoConnect)
         val cbAutoStart = findViewById<android.widget.CompoundButton>(R.id.cbAutoStart)
+        val cbBackgroundRun = findViewById<android.widget.CompoundButton?>(R.id.cbBackgroundRun)
+        val btnBatteryOptimization = findViewById<Button?>(R.id.btnBatteryOptimization)
         val cbShowInfo = findViewById<android.widget.CompoundButton>(R.id.cbShowInfo)
         val cbHideNav = findViewById<android.widget.CompoundButton>(R.id.cbHideNav)
         val btnMinus = findViewById<Button>(R.id.btnMinus)
         val btnPlus = findViewById<Button>(R.id.btnPlus)
         val tvDelayValue = findViewById<TextView>(R.id.tvDelayValue)
+
+        btnBatteryOptimization?.setOnClickListener {
+            requestIgnoreBatteryOptimization()
+        }
 
         // Card Chống dắt (Anti-theft)
         val btnAntiTheftCard = findViewById<View>(R.id.btnAntiTheftCard)
@@ -399,6 +432,31 @@ class MainActivity : AppCompatActivity() {
         val btnViewHistory = findViewById<View>(R.id.btnViewHistory)
         val btnScanBle = findViewById<Button>(R.id.btnScanBle)
         val btnChangeKey = findViewById<Button>(R.id.btnChangeKey)
+
+        // Card Trạng thái Đồng hồ Thông minh Wear OS trong Cài đặt
+        val btnSyncWatchNow = findViewById<AppCompatButton?>(R.id.btnSyncWatchNow)
+        btnSyncWatchNow?.setOnClickListener {
+            WatchSyncHelper.syncCurrentStateToWatch(this)
+            WatchSyncHelper.checkWatchConnection(this) { isConn, name ->
+                updateWatchStatusUI(isConn, name)
+                runOnUiThread {
+                    Toast.makeText(
+                        this,
+                        if (isConn) "🟢 Đã kết nối với $name & đồng bộ thành công!" else "⚪ Chưa phát hiện đồng hồ kết nối. Hãy mở app trên Wear OS!",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
+
+        WatchSyncHelper.onWatchConnectionStatusChanged = { isConn, name ->
+            updateWatchStatusUI(isConn, name)
+        }
+
+        // Kiểm tra ban đầu
+        WatchSyncHelper.checkWatchConnection(this) { isConn, name ->
+            updateWatchStatusUI(isConn, name)
+        }
 
         // Các view Chế độ Chống Nước Mưa
         val cardRainMode = findViewById<LinearLayout?>(R.id.cardRainMode)
@@ -451,7 +509,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             if (lastRawFingerprintBytes != null) {
-                val bmp = decodeR503ImageToBitmap(lastRawFingerprintBytes!!, 192, 192, isOpticalInvertMode)
+                val bmp = decodeR503ImageToBitmap(lastRawFingerprintBytes!!, currentImageWidth, currentImageHeight, isOpticalInvertMode)
                 if (bmp != null) {
                     showFingerprintImageZoomDialog(bmp)
                     return@OnClickListener
@@ -523,6 +581,13 @@ class MainActivity : AppCompatActivity() {
             withBluetoothPermission { showBleScanDialog() }
         }
 
+        findViewById<Button?>(R.id.btnRenameVehicle)?.setOnClickListener {
+            showRenameVehicleDialog()
+        }
+        findViewById<View?>(R.id.llVehicleNameClickArea)?.setOnClickListener {
+            showRenameVehicleDialog()
+        }
+
         btnChangeKey.setOnClickListener {
             if (isConnectedToVehicle()) {
                 showChangeKeyDialog()
@@ -574,16 +639,24 @@ class MainActivity : AppCompatActivity() {
             withBluetoothPermission { connectVehicle() }
         }
 
+        // Tự động khởi động dịch vụ chạy ngầm nếu được bật
+        if (isBackgroundServiceEnabled) {
+            VehicleBackgroundService.startService(this)
+        }
+
         // Đăng ký nhận phản hồi từ cả BLE và Classic BT
         BleManager.onMessageReceived = { handleVehicleFeedback(it) }
         BluetoothController.onMessageReceived = { handleVehicleFeedback(it) }
         BleManager.onRssiRead = { rssi ->
             runOnUiThread {
+                currentBleRssi = rssi
                 tvBleRssiVal?.text = "$rssi dBm"
                 tvFinderRssiDesc?.text = "Tín hiệu Bluetooth: $rssi dBm"
                 val dist = Math.pow(10.0, (-59.0 - rssi) / 20.0)
-                val distClamped = Math.min(Math.max(dist, 0.5), 15.0)
+                val distClamped = Math.min(Math.max(dist, 0.5), 15.0).toFloat()
+                currentEstimatedDistance = distClamped
                 tvFinderDistance?.text = String.format(Locale.US, "Khoảng cách: ~ %.1f Mét", distClamped)
+                syncStateToWatch()
             }
         }
 
@@ -605,6 +678,12 @@ class MainActivity : AppCompatActivity() {
             tabAdvanced.visibility = if (item.itemId == R.id.nav_advanced) View.VISIBLE else View.GONE
             tabSettings.visibility = if (item.itemId == R.id.nav_settings) View.VISIBLE else View.GONE
             tabFingerprint.visibility = if (item.itemId == R.id.nav_fingerprint) View.VISIBLE else View.GONE
+
+            if (item.itemId == R.id.nav_settings) {
+                WatchSyncHelper.checkWatchConnection(this) { isConn, name ->
+                    updateWatchStatusUI(isConn, name)
+                }
+            }
 
             if (item.itemId == R.id.nav_fingerprint && isConnectedToVehicle()) {
                 requestFingerprintList()
@@ -629,6 +708,27 @@ class MainActivity : AppCompatActivity() {
 
         cbAutoConnectTab2?.isChecked = isAutoConnectEnabled
         cbAutoStartTab2?.isChecked = isAutoStartEnabled
+        cbBackgroundRun?.isChecked = isBackgroundServiceEnabled
+        cbBackgroundRunTab2?.isChecked = isBackgroundServiceEnabled
+
+        cbBackgroundRun?.setOnCheckedChangeListener { _, isChecked ->
+            isBackgroundServiceEnabled = isChecked
+            if (cbBackgroundRunTab2?.isChecked != isChecked) {
+                cbBackgroundRunTab2?.isChecked = isChecked
+            }
+            saveSettings()
+            toggleBackgroundService(isChecked)
+        }
+
+        cbBackgroundRunTab2?.setOnCheckedChangeListener { _, isChecked ->
+            isBackgroundServiceEnabled = isChecked
+            if (cbBackgroundRun?.isChecked != isChecked) {
+                cbBackgroundRun?.isChecked = isChecked
+            }
+            saveSettings()
+            toggleBackgroundService(isChecked)
+        }
+
         cbAutoConnectTab2?.setOnCheckedChangeListener { _, isChecked ->
             isAutoConnectEnabled = isChecked
             if (cbAutoConnect.isChecked != isChecked) {
@@ -919,7 +1019,9 @@ class MainActivity : AppCompatActivity() {
                     // ƯU TIÊN 1: Lắp ráp chính xác tuyệt đối theo index chunk (Chống trôi, chống đen/trắng lệch dòng 100%)
                     val totalChunks = expectedTotalChunks.coerceAtLeast(1)
                     val chunkSize = 96
-                    val expectedBytes = (incomingImageWidth * incomingImageHeight / 2).coerceAtLeast(18432)
+                    val expectedBytes = (incomingImageWidth * incomingImageHeight / 2)
+                    currentImageWidth = incomingImageWidth
+                    currentImageHeight = incomingImageHeight
                     val rawBytes = ByteArray(expectedBytes)
                     // Khởi tạo mảng bằng 0xFF (mức sáng nền mặc định của cảm biến R503 để không tạo sọc đen)
                     java.util.Arrays.fill(rawBytes, 0xFF.toByte())
@@ -1081,6 +1183,26 @@ class MainActivity : AppCompatActivity() {
                 status == "DA_DOI_KEY" -> {
                     // Thành công
                 }
+                status.startsWith("VEHICLE_NAME|") -> {
+                    val name = status.substringAfter("VEHICLE_NAME|").trim()
+                    if (name.isNotEmpty()) {
+                        val mac = if (isBleMode) BleManager.activeMac else BluetoothController.deviceMac
+                        val prefs = getSharedPreferences("BT_PREF", MODE_PRIVATE)
+                        val savedForMac = if (mac != null) prefs.getString("VEHICLE_NAME_$mac", null) else null
+                        if (name != "XE_tsmart_BLE" || savedForMac == null) {
+                            vehicleCustomName = name
+                            val editor = prefs.edit().putString("VEHICLE_NAME", name)
+                            if (mac != null) {
+                                editor.putString("VEHICLE_NAME_$mac", name)
+                            }
+                            editor.apply()
+                            updateDeviceNameDisplay()
+                        } else if (savedForMac != null && name == "XE_tsmart_BLE") {
+                            val key = if (isBleMode) BleManager.SECRET_KEY else BluetoothController.SECRET_KEY
+                            sendVehicleCommand("$key|SET_NAME|$savedForMac")
+                        }
+                    }
+                }
                 status == "LOI_SAI_KEY" -> {
                     // Sai mã bảo mật
                 }
@@ -1168,9 +1290,11 @@ class MainActivity : AppCompatActivity() {
                 }
                 status.startsWith("FP_IMG_START") -> {
                     val parts = status.split("|")
-                    incomingImageWidth = if (parts.size > 1) parts[1].toIntOrNull() ?: 192 else 192
-                    incomingImageHeight = if (parts.size > 2) parts[2].toIntOrNull() ?: 192 else 192
-                    expectedTotalChunks = if (parts.size > 3) parts[3].toIntOrNull() ?: 192 else 192
+                    incomingImageWidth = if (parts.size > 1) parts[1].toIntOrNull() ?: 160 else 160
+                    incomingImageHeight = if (parts.size > 2) parts[2].toIntOrNull() ?: 160 else 160
+                    currentImageWidth = incomingImageWidth
+                    currentImageHeight = incomingImageHeight
+                    expectedTotalChunks = if (parts.size > 3) parts[3].toIntOrNull() ?: 134 else 134
                     indexedImageChunks.clear()
                     synchronized(enrollImageBuffer) {
                         enrollImageBuffer.setLength(0)
@@ -1980,6 +2104,25 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // Chạm vào ảnh trong dialog để mở trình soi kính lúp & xuất file .BMP/.PNG
+        ivFpTestImage.setOnClickListener {
+            if (cachedFpFile.exists()) {
+                val bmp = BitmapFactory.decodeFile(cachedFpFile.absolutePath)
+                if (bmp != null) {
+                    showFingerprintImageZoomDialog(bmp)
+                    return@setOnClickListener
+                }
+            }
+            if (lastRawFingerprintBytes != null) {
+                val bmp = decodeR503ImageToBitmap(lastRawFingerprintBytes!!, currentImageWidth, currentImageHeight, isOpticalInvertMode)
+                if (bmp != null) {
+                    showFingerprintImageZoomDialog(bmp)
+                    return@setOnClickListener
+                }
+            }
+            Toast.makeText(this, "Chưa có ảnh. Bấm 'Chụp Lăng Kính' để chụp trước!", Toast.LENGTH_SHORT).show()
+        }
+
         // Security level slider: max 4 (0 -> 4 corresponds to level 1 -> 5)
         sbSecLevel.progress = (fpSecLevelVal - 1).coerceIn(0, 4)
         updateSecLevelText(fpSecLevelVal)
@@ -2492,7 +2635,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun reRenderFingerprintImage() {
         val bytes = lastRawFingerprintBytes ?: return
-        val bmp = decodeR503ImageToBitmap(bytes, 192, 192, isOpticalInvertMode) ?: return
+        val bmp = decodeR503ImageToBitmap(bytes, currentImageWidth, currentImageHeight, isOpticalInvertMode) ?: return
         saveCachedFingerprintImage(bmp)
         runOnUiThread {
             ivTabFingerprintImageRef?.let {
@@ -2553,12 +2696,14 @@ class MainActivity : AppCompatActivity() {
         card.addView(imgView)
         layout.addView(card)
 
+        var currentZoomLevel = 2f
+
         val tvMeta = TextView(this).apply {
-            text = "Độ phân giải: 192 x 192 px (508 DPI)\nChế độ: " + if (!isOpticalInvertMode) "Quang học chuẩn nét (Optical Clear)" else "Biometric Vàng Kim (Neon)"
+            text = "Độ phân giải: ${currentImageWidth} x ${currentImageHeight} px (508 DPI)\nChế độ: " + if (!isOpticalInvertMode) "Quang học chuẩn nét (Optical Clear)" else "Biometric Vàng Kim (Neon)"
             setTextColor(0xFFCBD5E1.toInt())
             textSize = 12f
             gravity = Gravity.CENTER
-            setPadding(0, 0, 0, 24)
+            setPadding(0, 0, 0, 16)
         }
         layout.addView(tvMeta)
 
@@ -2571,16 +2716,90 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener {
                 isOpticalInvertMode = !isOpticalInvertMode
                 reRenderFingerprintImage()
-                val newBmp = decodeR503ImageToBitmap(lastRawFingerprintBytes ?: return@setOnClickListener, 192, 192, isOpticalInvertMode)
+                val newBmp = decodeR503ImageToBitmap(lastRawFingerprintBytes ?: return@setOnClickListener, currentImageWidth, currentImageHeight, isOpticalInvertMode)
                 if (newBmp != null) {
                     imgView.setImageBitmap(newBmp)
                     card.setCardBackgroundColor(if (!isOpticalInvertMode) 0xFFFFFFFF.toInt() else 0xFF000000.toInt())
-                    tvMeta.text = "Độ phân giải: 192 x 192 px (508 DPI)\nChế độ: " + if (!isOpticalInvertMode) "Quang học chuẩn nét (Optical Clear)" else "Biometric Vàng Kim (Neon)"
+                    tvMeta.text = "Độ phân giải: ${currentImageWidth} x ${currentImageHeight} px (508 DPI)\nChế độ: " + if (!isOpticalInvertMode) "Quang học chuẩn nét (Optical Clear)" else "Biometric Vàng Kim (Neon)"
                     text = if (!isOpticalInvertMode) "🟡 Đổi sang Chế độ Biometric Neon" else "⚪ Đổi sang Chế độ Quang học chuẩn nét"
                 }
             }
         }
         layout.addView(btnToggleMode)
+
+        // Hàng nút: Phóng to (Zoom 1x / 2x / 3x) khớp với tools/view_fingerprint.html
+        val llZoomRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, 10, 0, 10)
+        }
+        val btnZoom1 = AppCompatButton(this).apply {
+            text = "1x"
+            setBackgroundColor(0xFF0F172A.toInt())
+            setTextColor(0xFF94A3B8.toInt())
+            textSize = 11f
+            layoutParams = LinearLayout.LayoutParams(0, 90, 1f).apply { setMargins(4, 0, 4, 0) }
+            setOnClickListener {
+                card.layoutParams = LinearLayout.LayoutParams(360, 360).apply { gravity = Gravity.CENTER; setMargins(0, 10, 0, 16) }
+                card.requestLayout()
+            }
+        }
+        val btnZoom2 = AppCompatButton(this).apply {
+            text = "2x (Chuẩn)"
+            setBackgroundColor(0xFF1E293B.toInt())
+            setTextColor(0xFF00F0FF.toInt())
+            textSize = 11f
+            layoutParams = LinearLayout.LayoutParams(0, 90, 1f).apply { setMargins(4, 0, 4, 0) }
+            setOnClickListener {
+                card.layoutParams = LinearLayout.LayoutParams(540, 540).apply { gravity = Gravity.CENTER; setMargins(0, 10, 0, 16) }
+                card.requestLayout()
+            }
+        }
+        val btnZoom3 = AppCompatButton(this).apply {
+            text = "3x (Cực đại)"
+            setBackgroundColor(0xFF0F172A.toInt())
+            setTextColor(0xFFFFD700.toInt())
+            textSize = 11f
+            layoutParams = LinearLayout.LayoutParams(0, 90, 1f).apply { setMargins(4, 0, 4, 0) }
+            setOnClickListener {
+                card.layoutParams = LinearLayout.LayoutParams(680, 680).apply { gravity = Gravity.CENTER; setMargins(0, 10, 0, 16) }
+                card.requestLayout()
+            }
+        }
+        llZoomRow.addView(btnZoom1)
+        llZoomRow.addView(btnZoom2)
+        llZoomRow.addView(btnZoom3)
+        layout.addView(llZoomRow)
+
+        // Hàng nút: Lưu/Chia sẻ ảnh file .BMP gốc & .PNG (Tương tự view_fingerprint.html)
+        val llExportRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, 4, 0, 10)
+        }
+        val btnSaveBmp = AppCompatButton(this).apply {
+            text = "💾 Lưu BMP Gốc"
+            setBackgroundColor(0xFF1E293B.toInt())
+            setTextColor(0xFFFFD700.toInt())
+            textSize = 11f
+            layoutParams = LinearLayout.LayoutParams(0, 100, 1f).apply { setMargins(4, 0, 4, 0) }
+            setOnClickListener {
+                exportFingerprintImage("bmp", bmp)
+            }
+        }
+        val btnSavePng = AppCompatButton(this).apply {
+            text = "📤 Chia sẻ PNG"
+            setBackgroundColor(0xFF10B981.toInt())
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = 11f
+            layoutParams = LinearLayout.LayoutParams(0, 100, 1f).apply { setMargins(4, 0, 4, 0) }
+            setOnClickListener {
+                exportFingerprintImage("png", bmp)
+            }
+        }
+        llExportRow.addView(btnSaveBmp)
+        llExportRow.addView(btnSavePng)
+        layout.addView(llExportRow)
 
         val btnClose = AppCompatButton(this).apply {
             text = "Đóng"
@@ -2593,6 +2812,110 @@ class MainActivity : AppCompatActivity() {
 
         dialog.setView(layout)
         dialog.show()
+    }
+
+    private fun exportFingerprintImage(format: String, currentBmp: Bitmap) {
+        try {
+            val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val fileName = "fingerprint_${timeStamp}.${format.lowercase()}"
+            val exportDir = File(cacheDir, "exports").apply { mkdirs() }
+            val destFile = File(exportDir, fileName)
+
+            if (format.equals("bmp", ignoreCase = true)) {
+                val rawBytes = lastRawFingerprintBytes
+                if (rawBytes != null && rawBytes.isNotEmpty()) {
+                    val bmpBytes = generateBmpByteArray(rawBytes, currentImageWidth, currentImageHeight)
+                    FileOutputStream(destFile).use { it.write(bmpBytes) }
+                } else {
+                    FileOutputStream(destFile).use { out ->
+                        currentBmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+                    }
+                }
+            } else {
+                FileOutputStream(destFile).use { out ->
+                    currentBmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+                }
+            }
+
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                this,
+                "${applicationContext.packageName}.fileprovider",
+                destFile
+            )
+
+            val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = if (format == "bmp") "image/bmp" else "image/png"
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(android.content.Intent.createChooser(shareIntent, "Xuất ảnh vân tay quang học ($fileName)"))
+            Toast.makeText(this, "Đã tạo file $fileName thành công!", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Log.e("FP_EXPORT", "Export error", e)
+            Toast.makeText(this, "Lỗi xuất file ảnh: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun generateBmpByteArray(rawNibbleBytes: ByteArray, width: Int, height: Int): ByteArray {
+        val totalPixels = width * height
+        val bmpHeaderSize = 14 + 40 + 1024 // 1078 bytes
+        val bmpTotalSize = bmpHeaderSize + totalPixels
+        val bmpData = ByteArray(bmpTotalSize)
+
+        // Bitmap File Header (14 bytes)
+        bmpData[0] = 'B'.code.toByte()
+        bmpData[1] = 'M'.code.toByte()
+        bmpData[2] = (bmpTotalSize and 0xFF).toByte()
+        bmpData[3] = ((bmpTotalSize ushr 8) and 0xFF).toByte()
+        bmpData[4] = ((bmpTotalSize ushr 16) and 0xFF).toByte()
+        bmpData[5] = ((bmpTotalSize ushr 24) and 0xFF).toByte()
+        bmpData[10] = (bmpHeaderSize and 0xFF).toByte()
+        bmpData[11] = ((bmpHeaderSize ushr 8) and 0xFF).toByte()
+        bmpData[12] = ((bmpHeaderSize ushr 16) and 0xFF).toByte()
+        bmpData[13] = ((bmpHeaderSize ushr 24) and 0xFF).toByte()
+
+        // Bitmap Info Header (40 bytes)
+        bmpData[14] = 40
+        bmpData[18] = (width and 0xFF).toByte()
+        bmpData[19] = ((width ushr 8) and 0xFF).toByte()
+        bmpData[22] = (height and 0xFF).toByte()
+        bmpData[23] = ((height ushr 8) and 0xFF).toByte()
+        bmpData[26] = 1 // Planes
+        bmpData[28] = 8 // 8 bits per pixel (grayscale)
+        bmpData[34] = (totalPixels and 0xFF).toByte()
+        bmpData[35] = ((totalPixels ushr 8) and 0xFF).toByte()
+        bmpData[36] = ((totalPixels ushr 16) and 0xFF).toByte()
+        bmpData[37] = ((totalPixels ushr 24) and 0xFF).toByte()
+        bmpData[38] = 0x13.toByte(); bmpData[39] = 0x0B.toByte() // 2835 ppm (~508 DPI)
+        bmpData[42] = 0x13.toByte(); bmpData[43] = 0x0B.toByte()
+        bmpData[46] = 0; bmpData[47] = 1 // 256 colors
+
+        // Palette Grayscale (256 * 4 = 1024 bytes)
+        for (i in 0 until 256) {
+            bmpData[54 + i * 4 + 0] = i.toByte() // Blue
+            bmpData[54 + i * 4 + 1] = i.toByte() // Green
+            bmpData[54 + i * 4 + 2] = i.toByte() // Red
+            bmpData[54 + i * 4 + 3] = 0
+        }
+
+        // Đảo ngược dòng quét Bottom-Up theo chuẩn Windows BMP (khớp test_r503.cpp & view_fingerprint.html)
+        val maxNibbles = Math.min(rawNibbleBytes.size * 2, totalPixels)
+        for (y in 0 until height) {
+            val srcY = height - 1 - y
+            val dstRowOffset = bmpHeaderSize + y * width
+            for (x in 0 until width) {
+                val pixelIdx = srcY * width + x
+                val compIdx = pixelIdx / 2
+                val valGray = if (compIdx < rawNibbleBytes.size) {
+                    val b = rawNibbleBytes[compIdx].toInt() and 0xFF
+                    if (pixelIdx % 2 == 0) ((b ushr 4) * 17) else ((b and 0x0F) * 17)
+                } else {
+                    255 // Mặc định nền trắng quang học
+                }
+                bmpData[dstRowOffset + x] = valGray.toByte()
+            }
+        }
+        return bmpData
     }
 
     private fun startLiveFingerprintCapture() {
@@ -2703,6 +3026,13 @@ class MainActivity : AppCompatActivity() {
                 isBleMode = true
                 BleManager.activeMac = item.device.address
                 BleManager.deviceName = item.name
+
+                // Tải tên riêng đã lưu cho xe có địa chỉ MAC này
+                val prefs = getSharedPreferences("BT_PREF", MODE_PRIVATE)
+                val savedForThisMac = prefs.getString("VEHICLE_NAME_${item.device.address}", null)
+                vehicleCustomName = savedForThisMac
+                    ?: if (item.name.isNotBlank() && !item.name.equals("XE_tsmart_BLE", ignoreCase = true)) item.name else "Honda SH 150i"
+
                 updateDeviceNameDisplay()
 
                 if (BleManager.SECRET_KEY.isEmpty()) {
@@ -2888,6 +3218,10 @@ class MainActivity : AppCompatActivity() {
                 isBleMode = false
                 BluetoothController.deviceMac = selectedDevice.address
                 BluetoothController.deviceName = selectedDevice.name
+                val prefs = getSharedPreferences("BT_PREF", MODE_PRIVATE)
+                val savedForThisMac = prefs.getString("VEHICLE_NAME_${selectedDevice.address}", null)
+                vehicleCustomName = savedForThisMac
+                    ?: if (selectedDevice.name.isNotBlank()) selectedDevice.name else "Honda SH 150i"
                 updateDeviceNameDisplay()
                 showKeyDialog()
             }
@@ -2934,7 +3268,10 @@ class MainActivity : AppCompatActivity() {
         val input = EditText(this).apply {
             setText(vehicleCustomName)
             setSelection(text.length)
-            hint = "Nhập tên xe (VD: Honda SH 150i)"
+            hint = "Nhập tên xe (VD: Honda SH 150i, Vespa, NVX...)"
+            setTextColor(getColor(R.color.white))
+            setHintTextColor(getColor(R.color.text_muted))
+            textSize = 15f
         }
         val container = FrameLayout(this).apply {
             addView(input)
@@ -2942,18 +3279,29 @@ class MainActivity : AppCompatActivity() {
         }
         AlertDialog.Builder(this)
             .setTitle("Đổi tên xe (Garage Profile)")
-            .setMessage("Đặt tên gợi nhớ cho xe của bạn trên ứng dụng")
+            .setMessage("Đặt tên riêng cho xe. Tên sẽ được lưu vào bộ nhớ ứng dụng và đồng bộ vào bộ nhớ Flash NVS của bo mạch xe.")
             .setView(container)
             .setPositiveButton("Lưu") { _, _ ->
                 val newName = input.text.toString().trim()
                 if (newName.isNotEmpty()) {
                     vehicleCustomName = newName
-                    getSharedPreferences("BT_PREF", MODE_PRIVATE).edit()
-                        .putString("VEHICLE_NAME", vehicleCustomName)
-                        .apply()
+                    val mac = if (isBleMode) BleManager.activeMac else BluetoothController.deviceMac
+                    val prefs = getSharedPreferences("BT_PREF", MODE_PRIVATE)
+                    val editor = prefs.edit().putString("VEHICLE_NAME", vehicleCustomName)
+                    if (mac != null) {
+                        editor.putString("VEHICLE_NAME_$mac", vehicleCustomName)
+                    }
+                    editor.apply()
                     updateDeviceNameDisplay()
-                    tvTitleRef?.text = vehicleCustomName
-                    Toast.makeText(this, "Đã cập nhật tên xe: $vehicleCustomName", Toast.LENGTH_SHORT).show()
+
+                    // Gửi lệnh đồng bộ vào bộ nhớ Flash NVS của xe nếu đang kết nối
+                    if (isConnectedToVehicle()) {
+                        val key = if (isBleMode) BleManager.SECRET_KEY else BluetoothController.SECRET_KEY
+                        sendVehicleCommand("$key|SET_NAME|$vehicleCustomName")
+                        Toast.makeText(this, "Đã lưu và đồng bộ tên xe: $vehicleCustomName", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(this, "Đã lưu tên xe: $vehicleCustomName\n(Sẽ tự động cập nhật vào xe khi kết nối)", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
             .setNegativeButton("Hủy", null)
@@ -2965,6 +3313,7 @@ class MainActivity : AppCompatActivity() {
             .putString("DEVICE_MAC", mac)
             .putString("SECRET_KEY", key)
             .putBoolean("IS_BLE", isBle)
+            .putString("VEHICLE_NAME_$mac", vehicleCustomName)
             .putString("VEHICLE_NAME", vehicleCustomName)
             .apply()
         updateDeviceNameDisplay()
@@ -2972,34 +3321,48 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("MissingPermission")
     private fun updateDeviceNameDisplay() {
-        val tvDeviceName = findViewById<TextView>(R.id.tvDeviceName)
+        val tvDeviceName = findViewById<TextView?>(R.id.tvDeviceName)
+        val tvVehicleCardTitle = findViewById<TextView?>(R.id.tvVehicleCardTitle)
         val mac = if (isBleMode) BleManager.activeMac else BluetoothController.deviceMac
 
+        tvTitleRef?.text = vehicleCustomName
+        tvVehicleCardTitle?.text = vehicleCustomName
+
         if (mac == null) {
-            tvDeviceName.text = "Thiết bị: Chưa chọn"
-            tvTitleRef?.text = vehicleCustomName
+            tvDeviceName?.text = "Thiết bị: Chưa chọn"
             return
         }
         val type = if (isBleMode) "BLE" else "Classic"
-        tvDeviceName.text = "$vehicleCustomName ($type)"
-        tvTitleRef?.text = vehicleCustomName
+        val hwName = if (isBleMode) (BleManager.deviceName ?: "XE_tsmart_BLE") else (BluetoothController.deviceName ?: "Xe BT")
+        tvDeviceName?.text = "$hwName ($type) • $mac"
     }
 
     private fun saveSettings() {
-        getSharedPreferences("BT_PREF", MODE_PRIVATE).edit()
+        val mac = if (isBleMode) BleManager.activeMac else BluetoothController.deviceMac
+        val prefs = getSharedPreferences("BT_PREF", MODE_PRIVATE)
+        val editor = prefs.edit()
             .putBoolean("AUTO_CONNECT", isAutoConnectEnabled)
             .putBoolean("AUTO_START", isAutoStartEnabled)
+            .putBoolean("BG_RUN_ENABLED", isBackgroundServiceEnabled)
             .putBoolean("SHOW_INFO", isShowInfoEnabled)
             .putBoolean("HIDE_NAV", isHideNavEnabled)
             .putString("VEHICLE_NAME", vehicleCustomName)
-            .putInt("DELAY_VALUE", autoStartDelay).apply()
+            .putInt("DELAY_VALUE", autoStartDelay)
+        if (mac != null) {
+            editor.putString("VEHICLE_NAME_$mac", vehicleCustomName)
+        }
+        editor.apply()
     }
 
     private fun loadDevice() {
         val prefs = getSharedPreferences("BT_PREF", MODE_PRIVATE)
         val mac = prefs.getString("DEVICE_MAC", null)
         val key = prefs.getString("SECRET_KEY", "271000") ?: "271000"
-        vehicleCustomName = prefs.getString("VEHICLE_NAME", "Honda SH 150i") ?: "Honda SH 150i"
+        
+        // Tải tên riêng theo từng xe (dựa trên MAC đã lưu)
+        vehicleCustomName = (if (mac != null) prefs.getString("VEHICLE_NAME_$mac", null) else null)
+            ?: prefs.getString("VEHICLE_NAME", "Honda SH 150i")
+            ?: "Honda SH 150i"
         isBleMode = prefs.getBoolean("IS_BLE", true)
 
         if (isBleMode) {
@@ -3012,10 +3375,11 @@ class MainActivity : AppCompatActivity() {
 
         isAutoConnectEnabled = prefs.getBoolean("AUTO_CONNECT", false)
         isAutoStartEnabled = prefs.getBoolean("AUTO_START", false)
+        isBackgroundServiceEnabled = prefs.getBoolean("BG_RUN_ENABLED", true)
         isShowInfoEnabled = prefs.getBoolean("SHOW_INFO", true)
         isHideNavEnabled = prefs.getBoolean("HIDE_NAV", false)
         autoStartDelay = prefs.getInt("DELAY_VALUE", 3)
-        tvTitleRef?.text = vehicleCustomName
+        updateDeviceNameDisplay()
     }
 
     @SuppressLint("MissingPermission")
@@ -3108,21 +3472,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun syncStateToWatch() {
-        try {
-            val putDataMapReq = PutDataMapRequest.create("/status")
-            putDataMapReq.dataMap.putBoolean("esp_connected", isConnectedToVehicle())
-            putDataMapReq.dataMap.putBoolean("power_on", isOn)
-            putDataMapReq.dataMap.putLong("timestamp", System.currentTimeMillis())
-
-            val putDataReq = putDataMapReq.asPutDataRequest()
-            putDataReq.setUrgent()
-
-            Wearable.getDataClient(this).putDataItem(putDataReq)
-                .addOnSuccessListener { Log.d("WEAR_SYNC", "State synced: ESP=${isConnectedToVehicle()}, ON=$isOn") }
-                .addOnFailureListener { e -> Log.e("WEAR_SYNC", "Sync failed", e) }
-        } catch (e: Exception) {
-            Log.e("WEAR_SYNC", "Sync error", e)
-        }
+        WatchSyncHelper.isVehiclePowerOn = isOn
+        WatchSyncHelper.currentDistanceMeters = if (isConnectedToVehicle()) currentEstimatedDistance else -1.0f
+        WatchSyncHelper.currentSignalRssi = if (isConnectedToVehicle()) currentBleRssi else 0
+        WatchSyncHelper.syncCurrentStateToWatch(this)
     }
 
     private fun updatePowerUI(on: Boolean) {
@@ -3333,12 +3686,90 @@ class MainActivity : AppCompatActivity() {
     }
 
 
+    private fun toggleBackgroundService(enable: Boolean) {
+        if (enable) {
+            // Kiểm tra quyền thông báo trên Android 13+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 102)
+                }
+            }
+            VehicleBackgroundService.startService(this)
+            Toast.makeText(this, "🟢 Đã BẬT chạy ngầm: Luôn sẵn sàng kết nối xe!", Toast.LENGTH_SHORT).show()
+        } else {
+            VehicleBackgroundService.stopService(this)
+            Toast.makeText(this, "⚪ Đã TẮT chạy ngầm", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun requestIgnoreBatteryOptimization() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            val isIgnoring = powerManager.isIgnoringBatteryOptimizations(packageName)
+            if (isIgnoring) {
+                Toast.makeText(this, "✅ Ứng dụng đã được cấp quyền chạy ngầm không giới hạn!", Toast.LENGTH_SHORT).show()
+            } else {
+                try {
+                    val intent = android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = android.net.Uri.parse("package:$packageName")
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    // Fallback sang màn hình cài đặt quản lý pin tổng quát
+                    try {
+                        val intent = android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                        startActivity(intent)
+                    } catch (e2: Exception) {
+                        Toast.makeText(this, "Vui lòng tắt tối ưu hóa pin cho ứng dụng trong Cài đặt", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        } else {
+            Toast.makeText(this, "Hệ điều hành Android này không bị giới hạn pin Doze.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
             pendingPermissionAction?.invoke()
         }
         pendingPermissionAction = null
+    }
+
+    override fun onResume() {
+        super.onResume()
+        WatchSyncHelper.checkWatchConnection(this) { isConn, name ->
+            updateWatchStatusUI(isConn, name)
+        }
+    }
+
+    private fun updateWatchStatusUI(isConnected: Boolean, deviceName: String?) {
+        runOnUiThread {
+            val tvWatchStatusBadge = findViewById<TextView?>(R.id.tvWatchStatusBadge)
+            val ivWatchStatusIcon = findViewById<ImageView?>(R.id.ivWatchStatusIcon)
+            val tvWatchDeviceName = findViewById<TextView?>(R.id.tvWatchDeviceName)
+            val tvWatchStatusDesc = findViewById<TextView?>(R.id.tvWatchStatusDesc)
+
+            if (isConnected) {
+                val name = if (!deviceName.isNullOrBlank()) deviceName else "Đồng hồ Wear OS"
+                tvWatchStatusBadge?.text = "🟢 Đã kết nối"
+                tvWatchStatusBadge?.setTextColor(ContextCompat.getColor(this, R.color.accent_emerald))
+                ivWatchStatusIcon?.setColorFilter(ContextCompat.getColor(this, R.color.accent_emerald))
+                tvWatchDeviceName?.text = name
+                tvWatchDeviceName?.setTextColor(ContextCompat.getColor(this, R.color.white))
+                tvWatchStatusDesc?.text = "Đang kết nối & sẵn sàng nhận lệnh điều khiển xe"
+                tvWatchStatusDesc?.setTextColor(ContextCompat.getColor(this, R.color.secondary_teal))
+            } else {
+                tvWatchStatusBadge?.text = "⚪ Chưa kết nối"
+                tvWatchStatusBadge?.setTextColor(ContextCompat.getColor(this, R.color.text_muted))
+                ivWatchStatusIcon?.setColorFilter(ContextCompat.getColor(this, R.color.text_muted))
+                tvWatchDeviceName?.text = "Đồng hồ: Chưa kết nối"
+                tvWatchDeviceName?.setTextColor(ContextCompat.getColor(this, R.color.text_secondary))
+                tvWatchStatusDesc?.text = "Bật Bluetooth & mở app trên đồng hồ Wear OS"
+                tvWatchStatusDesc?.setTextColor(ContextCompat.getColor(this, R.color.text_muted))
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -3349,6 +3780,13 @@ class MainActivity : AppCompatActivity() {
             Log.e("BLE_SEC", "Error unregistering bondStateReceiver", e)
         }
         handler.removeCallbacks(rssiPollRunnable)
-        disconnectVehicle()
+
+        // Nếu người dùng bật Chạy Ngầm (isBackgroundServiceEnabled == true), KHÔNG ngắt kết nối BLE
+        // Service VehicleBackgroundService sẽ tiếp quản và duy trì kết nối liên tục
+        if (!isBackgroundServiceEnabled) {
+            disconnectVehicle()
+        } else {
+            Log.i("APP_LIFECYCLE", "MainActivity onDestroy: Background Service is active, keeping BLE connected.")
+        }
     }
 }

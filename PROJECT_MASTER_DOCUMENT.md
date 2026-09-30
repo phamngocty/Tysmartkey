@@ -285,7 +285,9 @@ $$\text{<SECRET\_KEY>|<COMMAND>[|<PARAM1>|<PARAM2>|...]\n}$$
 | | `2` | Không | **Đề xe**: Kích Relay 2 trong 1.5s (chỉ thực hiện khi xe đang mở khóa). |
 | | `3` | Không | **Tìm xe**: Kích Relay 3 (còi & xi-nhan) trong 3.0s. |
 | | `TELE` / `STATUS` | Không | Yêu cầu ESP32 phản hồi trạng thái xe và dữ liệu Telemetry tức thời. |
-| **Quản trị bảo mật** | `9` | `<NEW_KEY>` | **Đổi mã bảo mật**: Lưu `SECRET_KEY` mới vào NVS và cập nhật Passkey BLE SMP. |
+| **Quản trị bảo mật & Tên xe** | `9` | `<NEW_KEY>` | **Đổi mã bảo mật**: Lưu `SECRET_KEY` mới vào NVS và cập nhật Passkey BLE SMP. |
+| | `SET_NAME` | `<TÊN_XE>` | **Đổi tên xe riêng**: Lưu tên riêng của xe vào Flash NVS và cập nhật BLE name. |
+| | `GET_NAME` | Không | Đọc tên riêng của xe đang lưu trong Flash NVS (`VEHICLE_NAME\|<name>`). |
 | | `UNPAIR_ALL` | Không | **Xóa toàn bộ thiết bị ghép đôi**: Xóa sạch danh sách Bonding trong NVS. |
 | | `SLEEP_NOW` | Không | Yêu cầu ESP32 chuyển ngay sang **Tầng 2: Deep Sleep**. |
 | **Quản lý vân tay** | `FP_LIST` | Không | Yêu cầu gửi danh sách toàn bộ ID và tên vân tay hiện có. |
@@ -426,6 +428,15 @@ sequenceDiagram
 3. **Timeout 15 giây**: Nếu quá 15 giây không nhận thêm khối dữ liệu mới (do mất sóng hoặc thoát app), ESP32 tự động gọi `Update.abort()`, hủy bỏ phân vùng nháp và quay về hoạt động bình thường.
 4. **Mất kết nối đột ngột (GATT Disconnect)**: Sự kiện `onDisconnect()` tự động phát hiện nếu đang OTA sẽ lập tức hủy tiến trình an toàn, bảo vệ phân vùng đang chạy hiện tại.
 
+### 5.6 Kiến trúc Dịch vụ chạy ngầm liên tục (Android Background Service & Always-Ready Connection)
+Nhằm đảm bảo điện thoại luôn tự động kết nối xe ngay khi người dùng bước lại gần kể cả khi màn hình tắt hoặc đang dùng ứng dụng khác:
+- **`VehicleBackgroundService` (Foreground Service chuẩn Android 12 - 15)**:
+  - Khai báo `<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />` và `FOREGROUND_SERVICE_CONNECTED_DEVICE`.
+  - Giữ tiến trình luôn ưu tiên cao (High Priority) kèm thông báo hệ thống liên tục trên Notification Bar (`Ongoing Notification`).
+  - **Miễn trừ tiết kiệm pin (`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`)**: Ngăn chặn Doze Mode của Android tắt Bluetooth ngầm.
+  - **Vòng lặp tự phục hồi kết nối (Heartbeat Reconnect 8s)**: Tự động phát hiện khi xe vào vùng phủ sóng BLE (RSSI $\ge -90\text{ dBm}$) để thực hiện handshake và duy trì kết nối GATT.
+  - Khi người dùng thoát giao diện `MainActivity`, kết nối BLE không bị ngắt (`onDestroy` không gọi `disconnectVehicle()` nếu chế độ chạy ngầm đang bật), cho phép điều khiển xe qua đồng hồ Wear OS và tự động mở khóa tức thì.
+
 ---
 
 ## 6. ĐẶC TẢ CẢM BIẾN VÂN TAY R503 & ĐÈN VÒNG HÀO QUANG AURA RGB 360°
@@ -456,6 +467,42 @@ Người dùng có thể cài đặt màu sắc và kiểu nháy riêng biệt c
 2. `EVT_LOCKED`: Khi xe đang khóa đỗ ngoài bãi (Mặc định: Tắt hoàn toàn để bảo vệ bình ắc quy xe máy).
 3. `EVT_SUCCESS`: Khi quét đúng vân tay hoặc mở xe thành công (Mặc định: Nháy xanh dương 2 lần).
 4. `EVT_ERROR`: Khi quét sai vân tay hoặc báo động (Mặc định: Nháy đỏ 3 lần kèm còi).
+
+### 6.3 Đặc tả kiến trúc ma trận điểm ảnh & Giải pháp chống méo răng cưa (160x160 vs 192x192)
+*(Xem tài liệu kỹ thuật chuyên sâu tại: [docs/R503_OPTICAL_FINGERPRINT_MASTER_SPECIFICATION.md](file:///c:/Users/phamn/Documents/PlatformIO/Tysmartkey/docs/R503_OPTICAL_FINGERPRINT_MASTER_SPECIFICATION.md))*
+- **Thực tế phần cứng GROW R503**:
+  Cảm biến R503 trên thị trường có 2 biến thể phần cứng quang học:
+  1. **Ma trận cảm biến tròn (Circular Matrix)**: $160 \times 160$ pixels ($25,600$ điểm ảnh $\rightarrow 12,800$ bytes nén 4-bit $\rightarrow$ đúng **100 gói tin UART 128B**).
+  2. **Ma trận cảm biến vuông (Square Matrix)**: $192 \times 192$ pixels ($36,864$ điểm ảnh $\rightarrow 18,432$ bytes nén 4-bit $\rightarrow$ đúng **144 gói tin UART 128B**).
+- **Nguyên nhân gốc rễ lỗi rách ảnh / răng cưa ziczac**:
+  Nếu cảm biến phát 100 gói (12,800B - $160 \times 160$) nhưng firmware hoặc App Android ép hiển thị với bề rộng 192px (stride 192), mỗi dòng bị lệch lùi 32 pixel ($192 - 160 = 32\text{px}$), tạo thành các dải chéo răng cưa ziczac và thiếu hụt 58 dòng đen tuyền ở đáy ($11,264$ pixel thiếu).
+- **Cơ chế tự động nhận diện kích thước động (Auto-Detection Stride Engine)**:
+  ESP32-C3 và App Android tự động xác định kích thước ảnh dựa vào tổng số byte UART thu được từ lệnh `UpImage` (Opcode `0x0A`):
+  - $\le 13,000$ bytes (thường là $12,800\text{B}$): Chiều rộng = 160, Chiều cao = 160.
+  - $13,001$ đến $20,000$ bytes (thường là $18,432\text{B}$): Chiều rộng = 192, Chiều cao = 192.
+  - $> 20,000$ bytes: Chiều rộng = 208, Chiều cao = 288 (chuẩn R307/FPC lớn).
+
+### 6.4 Kỹ thuật khóa khung truyền 6-byte & Cấu hình đệm UART 32KB
+- **Bộ đệm phần cứng UART 32KB (`setRxBufferSize(32768)`)**:
+  Bộ đệm UART mặc định của ESP32 Arduino chỉ có 256 bytes. Trong khi đó, luồng dữ liệu `UpImage` truyền dồn dập $12.8\text{KB} - 18.4\text{KB}$ với baudrate 57600bps trong vòng dưới 3.5 giây. Nếu không mở rộng buffer, FIFO sẽ tràn ngay sau gói thứ 2, làm mất gói dữ liệu ảnh. Firmware bắt buộc cấu hình:
+  ```cpp
+  r503Serial.setRxBufferSize(32768);
+  r503Serial.begin(57600, SERIAL_8N1, 0, 1);
+  ```
+- **Khóa tiêu đề 6-byte chống trùng khớp giả (6-byte Header Lock)**:
+  Trong luồng pixel quang học 4-bit, việc ngẫu nhiên xuất hiện 2 byte liền kề `0xEF 0x01` xảy ra với xác suất cực lớn ($1/65536$). Nếu chỉ kiểm tra 2 byte tiêu đề, bộ giải mã sẽ bị lệch khung (desynchronized) và hỏng toàn bộ các gói tin phía sau.  
+  Firmware áp dụng hàm đồng bộ nghiêm ngặt kiểm tra đầy đủ 6 byte:
+  $$\text{0xEF 0x01 0xFF 0xFF 0xFF 0xFF}$$
+
+### 6.5 Giao thức truyền ảnh Live BLE động & Tái tạo hiển thị trên Android
+- **Bộ ba bản tin BLE hiển thị ảnh vân tay**:
+  1. `FP_IMG_START|<width>|<height>|<totalChunks>`: Báo trước kích thước ma trận và tổng số khối BLE MTU 240B.
+  2. `FP_IMG_CHUNK|<index>|<total>|<base64>`: Từng khối dữ liệu ảnh truyền qua BLE đặc tính Data.
+  3. `FP_IMG_END`: Kết thúc truyền, kích hoạt giải nén Bitmap và hiển thị lên UI.
+- **Thuật toán tái tạo ảnh Android (`MainActivity.kt`)**:
+  - Tách 2 pixel từ mỗi byte nén 4-bit: High nibble (`(b >> 4) & 0x0F`) và Low nibble (`b & 0x0F`), chuẩn hóa về thang độ xám 8-bit ($0 - 255$).
+  - Thuật toán kéo dãn tương phản tự động (Percentile 2% - 98% Contrast Stretching) làm nổi rõ từng đường vân nổi (ridges) và rãnh vân (valleys) ngay cả khi ngón tay áp nhẹ hoặc bị mờ.
+  - Hỗ trợ phóng to trực quan với thông số độ phân giải thực `${width} x ${height} px`.
 
 ---
 
@@ -541,12 +588,25 @@ Xe máy thường đỗ lâu ngày trong nhà hoặc bãi đỗ. Hệ thống á
 ### 9.2 Module Ứng Dụng Đồng Hồ Wear OS (`:wear`)
 - Phát triển bằng **Jetpack Compose for Wear OS**:
   - Giao diện tối ưu cho màn hình tròn AMOLED, nền đen tuyệt đối tiết kiệm pin.
-  - Vòng tròn trạng thái phản hồi màu sắc động: Đỏ (Xe Khóa), Xanh Lá (Xe Mở), Vàng (Đang Đề Máy).
-  - **Thuật toán nhận diện cử chỉ búng tay (Pinch Gesture)**:
-    - Sử dụng cảm biến `Sensor.TYPE_LINEAR_ACCELERATION`.
-    - Khi phát hiện gia tốc đột ngột $> 18\text{ m/s}^2$ với thời gian hồi chiêu $> 1.2\text{s}$, đồng hồ tự động phát xung Haptic rung mạnh và gửi lệnh đề nổ máy tới xe qua điện thoại.
-    - Giới hạn an toàn: Tự động khóa tính năng búng tay sau 2 lần đề nổ liên tiếp để chống kích hoạt ngoài ý muốn khi đang lái xe trên đường xóc.
-  - Đồng bộ trạng thái 2 chiều liên tục qua Google Wearable Data Layer API.
+  - **Tab 1 - Điều khiển chính (MainControlScreen)**:
+    - Vòng tròn trạng thái phản hồi màu sắc động: Đỏ Neon (Xe Khóa), Xanh Cyan (Xe Mở), Vàng Neon (Đang Đề Máy).
+    - Tương tác chạm đơn giản: Chạm (Click) để Bật/Tắt điện xe; Nhấn giữ (Long Click) để Đề nổ máy.
+  - **Tab 2 - Radar Tìm xe & Khoảng cách thực tế (AdvancedScreen)**:
+    - Hiển thị tên xe cá nhân hóa (`vehicleName`).
+    - Đo khoảng cách thời gian thực: `~ X.X m` (màu xanh lá ngọc khi kết nối), tín hiệu RSSI `$rssi dBm`.
+    - Nút bấm `TÌM XE (CÒI/ĐÈN)` (màu vàng kim nổi bật) gửi lệnh `"3"` để bật còi và nháy xi-nhan tìm xe từ xa.
+  - **Tab 3 - Cài đặt & Trạng thái (SettingsScreen)**:
+    - Bật/tắt tự động đề nổ sau khi bật ACC.
+    - Bật/tắt cử chỉ búng tay.
+    - Trạng thái kết nối thời gian thực với Điện thoại và Xe.
+  - **Thuật toán nhận diện cử chỉ búng tay (Snap / Pinch Gesture)**:
+    - Hỗ trợ đa cảm biến: `Sensor.TYPE_LINEAR_ACCELERATION` (ngưỡng gia tốc $12.0\text{ m/s}^2$) hoặc fallback `Sensor.TYPE_ACCELEROMETER` (ngưỡng biến thiên jerk $9.0\text{ m/s}^2$).
+    - Cooldown $1.5\text{s}$, rung phản hồi xúc giác Haptic.
+    - Khi xe đang mở điện: Búng tay kích hoạt Đề nổ máy (Lệnh `"2"`).
+    - Khi xe đang khóa: Búng tay mở khóa điện xe (Lệnh `"1"`).
+  - **Đồng bộ trạng thái 2 chiều liên tục qua `WatchSyncHelper`**:
+    - Sử dụng Google Wearable Data Layer API (`/status`, `/command`, `/ping`).
+    - Đồng bộ cả khi ứng dụng điện thoại chạy ngầm qua `VehicleBackgroundService`.
 
 ---
 
