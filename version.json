@@ -1,26 +1,21 @@
 {
   "app": {
-    "versionCode": 3,
-    "versionName": "1.0.2",
-    "apkUrl": "https://alert.nas152.duckdns.org/downloads/app-debug.apk",
-    "apkName": "app-debug.apk",
+    "versionCode": 4,
+    "versionName": "1.0.3",
+    "apkUrl": "",
     "changelog": "• Cập nhật tính năng mới và cải thiện độ ổn định"
   },
   "firmware": {
-    "versionCode": 3,
-    "versionName": "1.0.2",
-    "binUrl": "https://alert.nas152.duckdns.org/downloads/firmware.bin",
-    "binName": "firmware.bin",
-    "secondaryBinUrl": "",
-    "secondaryBinName": "",
-    "oledBinUrl": "https://alert.nas152.duckdns.org/downloads/firmware.bin",
+    "versionCode": 4,
+    "versionName": "1.0.3",
+    "binUrl": "",
+    "oledBinUrl": "",
     "changelog": "• Cập nhật tính năng mới và cải thiện độ ổn định"
   },
   "firmware_oled": {
-    "versionCode": 3,
-    "versionName": "1.0.2",
-    "binUrl": "https://alert.nas152.duckdns.org/downloads/firmware.bin",
-    "binName": "firmware_oled.bin",
+    "versionCode": 4,
+    "versionName": "1.0.3",
+    "binUrl": "",
     "changelog": "• Cập nhật tính năng mới và cải thiện độ ổn định"
   }
 }
