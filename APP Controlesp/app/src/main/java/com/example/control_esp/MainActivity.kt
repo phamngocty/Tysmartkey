@@ -1013,17 +1013,89 @@ class MainActivity : AppCompatActivity() {
 
         // 2. Kết thúc nhận ảnh: Giải mã và xử lý Bitmap trong Thread riêng, giải phóng Main UI Thread
         if (status.startsWith("FP_IMG_END")) {
+            val endReportedBytes = if (status.contains("|")) status.substringAfter("FP_IMG_END|").trim().toIntOrNull() else null
             Thread {
                 var decodedBmp: Bitmap? = null
                 if (indexedImageChunks.isNotEmpty()) {
                     // ƯU TIÊN 1: Lắp ráp chính xác tuyệt đối theo index chunk (Chống trôi, chống đen/trắng lệch dòng 100%)
-                    val totalChunks = expectedTotalChunks.coerceAtLeast(1)
+                    val maxSeq = indexedImageChunks.keys.maxOrNull() ?: -1
+                    val totalChunks = Math.max(expectedTotalChunks, maxSeq + 1).coerceAtLeast(1)
                     val chunkSize = 96
-                    val expectedBytes = (incomingImageWidth * incomingImageHeight / 2)
-                    currentImageWidth = incomingImageWidth
-                    currentImageHeight = incomingImageHeight
+
+                    // Tính toán tổng số byte thực tế nhận được từ các chunk
+                    var calcTotalBytes = 0
+                    for (seq in 0 until totalChunks) {
+                        val cBytes = indexedImageChunks[seq]
+                        if (cBytes != null) {
+                            calcTotalBytes += cBytes.size
+                        }
+                    }
+
+                    // Tự động nhận diện độ phân giải thực tế dựa trên số byte thu thập được / thông báo firmware:
+                    // 12.800 bytes = 25.600 pixel = 160 x 160 (R503 Tròn chuẩn)
+                    // 18.432 bytes = 36.864 pixel = 192 x 192 (R503 Vuông / TZM1026)
+                    // 29.952 bytes = 59.904 pixel = 208 x 288 (R307)
+                    val actualW: Int
+                    val actualH: Int
+                    val expectedBytes: Int
+
+                    val targetBytes = endReportedBytes ?: if (calcTotalBytes in 12700..12850) 12800
+                        else if (calcTotalBytes in 18350..18500) 18432
+                        else if (calcTotalBytes in 29800..30100) 29952
+                        else if (expectedTotalChunks == 134 || maxSeq in 100..133) 12800
+                        else if (expectedTotalChunks == 192 || maxSeq in 134..191) 18432
+                        else if (expectedTotalChunks == 312 || maxSeq > 191) 29952
+                        else calcTotalBytes
+
+                    when (targetBytes) {
+                        12800 -> {
+                            actualW = 160
+                            actualH = 160
+                            expectedBytes = 12800
+                        }
+                        18432 -> {
+                            actualW = 192
+                            actualH = 192
+                            expectedBytes = 18432
+                        }
+                        29952 -> {
+                            actualW = 208
+                            actualH = 288
+                            expectedBytes = 29952
+                        }
+                        else -> {
+                            if (incomingImageWidth * incomingImageHeight / 2 == targetBytes && targetBytes > 0) {
+                                actualW = incomingImageWidth
+                                actualH = incomingImageHeight
+                                expectedBytes = targetBytes
+                            } else {
+                                val totalPix = targetBytes * 2
+                                val side = Math.round(Math.sqrt(totalPix.toDouble())).toInt()
+                                if (side * side == totalPix && side > 0) {
+                                    actualW = side
+                                    actualH = side
+                                    expectedBytes = targetBytes
+                                } else if (totalPix % 160 == 0 && totalPix > 0) {
+                                    actualW = 160
+                                    actualH = totalPix / 160
+                                    expectedBytes = targetBytes
+                                } else if (totalPix % 192 == 0 && totalPix > 0) {
+                                    actualW = 192
+                                    actualH = totalPix / 192
+                                    expectedBytes = targetBytes
+                                } else {
+                                    actualW = incomingImageWidth
+                                    actualH = incomingImageHeight
+                                    expectedBytes = targetBytes.coerceAtLeast(1)
+                                }
+                            }
+                        }
+                    }
+
+                    currentImageWidth = actualW
+                    currentImageHeight = actualH
                     val rawBytes = ByteArray(expectedBytes)
-                    // Khởi tạo mảng bằng 0xFF (mức sáng nền mặc định của cảm biến R503 để không tạo sọc đen)
+                    // Mặc định nền trắng quang học 0xFF
                     java.util.Arrays.fill(rawBytes, 0xFF.toByte())
 
                     var receivedChunksCount = 0
@@ -1038,11 +1110,11 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
                     }
-                    Log.i("FP_IMG", "✅ Đã lắp ráp trọn vẹn: $receivedChunksCount / $totalChunks chunks ($expectedBytes bytes)")
+                    Log.i("FP_IMG", "✅ Đã lắp ráp trọn vẹn: $receivedChunksCount / $totalChunks chunks ($expectedBytes bytes) -> $actualW x $actualH px")
                     indexedImageChunks.clear()
                     synchronized(enrollImageBuffer) { enrollImageBuffer.setLength(0) }
                     lastRawFingerprintBytes = rawBytes
-                    decodedBmp = decodeR503ImageToBitmap(rawBytes, incomingImageWidth, incomingImageHeight, isOpticalInvertMode)
+                    decodedBmp = decodeR503ImageToBitmap(rawBytes, actualW, actualH, isOpticalInvertMode)
                 } else {
                     // ƯU TIÊN 2: Fallback giải mã chuỗi Base64 truyền thống
                     val fullB64: String
@@ -1091,7 +1163,7 @@ class MainActivity : AppCompatActivity() {
                             it.setImageBitmap(bmp)
                         }
                         tvTabImageStatusRef?.text = "✅ Chụp ảnh quang học thành công"
-                        tvTabImageDescRef?.text = "Độ phân giải 508 DPI • Đã nhận lúc $timeStr"
+                        tvTabImageDescRef?.text = "Độ phân giải ${bmp.width}x${bmp.height} px (508 DPI) • Đã nhận lúc $timeStr"
 
                         // 3. Cập nhật trực tiếp lên Card Ảnh trong Dialog Tinh chỉnh & Test (nếu đang mở)
                         ivFpTestImageRef?.let {
@@ -1100,7 +1172,7 @@ class MainActivity : AppCompatActivity() {
                             it.colorFilter = null
                             it.setImageBitmap(bmp)
                         }
-                        tvFpTestImageInfoRef?.text = "Ảnh quang học 192x192 (508 DPI) • $timeStr"
+                        tvFpTestImageInfoRef?.text = "Ảnh quang học ${bmp.width}x${bmp.height} (508 DPI) • $timeStr"
                         if (tvFpTestStatusRef?.text?.contains("Đang nhận ảnh") == true) {
                             val currentText = tvFpTestStatusRef?.text.toString().replace("• Đang nhận ảnh quang học từ cảm biến...", "")
                             tvFpTestStatusRef?.text = "$currentText\n📸 Đã hiển thị ảnh lăng kính ($timeStr)"
@@ -2544,92 +2616,87 @@ class MainActivity : AppCompatActivity() {
 
     private fun decodeR503ImageToBitmap(
         rawBytes: ByteArray,
-        width: Int = 192,
-        height: Int = 192,
+        width: Int = 160,
+        height: Int = 160,
         invert: Boolean = false
     ): Bitmap? {
         if (rawBytes.isEmpty()) return null
-        val totalPixels = width * height
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+
+        // Tự động nhận diện độ phân giải thực tế dựa trên kích thước mảng byte (12.800B -> 160x160, 18.432B -> 192x192)
+        val actualW: Int
+        val actualH: Int
+        when (rawBytes.size) {
+            12800 -> {
+                actualW = 160
+                actualH = 160
+            }
+            18432 -> {
+                actualW = 192
+                actualH = 192
+            }
+            29952 -> {
+                actualW = 208
+                actualH = 288
+            }
+            else -> {
+                if (width * height / 2 == rawBytes.size && width > 0 && height > 0) {
+                    actualW = width
+                    actualH = height
+                } else {
+                    val totalPix = rawBytes.size * 2
+                    val side = Math.round(Math.sqrt(totalPix.toDouble())).toInt()
+                    if (side * side == totalPix && side > 0) {
+                        actualW = side
+                        actualH = side
+                    } else if (totalPix % 160 == 0 && totalPix > 0) {
+                        actualW = 160
+                        actualH = totalPix / 160
+                    } else if (totalPix % 192 == 0 && totalPix > 0) {
+                        actualW = 192
+                        actualH = totalPix / 192
+                    } else {
+                        actualW = width
+                        actualH = height
+                    }
+                }
+            }
+        }
+
+        currentImageWidth = actualW
+        currentImageHeight = actualH
+
+        val totalPixels = actualW * actualH
+        val bitmap = Bitmap.createBitmap(actualW, actualH, Bitmap.Config.ARGB_8888)
         val pixels = IntArray(totalPixels)
-        val rawNibbles = IntArray(totalPixels)
+        val maxCompBytes = rawBytes.size
 
-        val maxBytes = Math.min(rawBytes.size, totalPixels / 2)
-        val hist = IntArray(16)
-
-        // 1. Trích xuất các nibble 4-bit (16 mức xám: 0..15) từ byte UART
-        val validPixels = Math.min(totalPixels, maxBytes * 2)
-        for (idx in 0 until maxBytes) {
-            val b = rawBytes[idx].toInt() and 0xFF
-            val p1 = (b ushr 4) and 0x0F
-            val p2 = b and 0x0F
-            val i = idx * 2
-
-            rawNibbles[i] = p1
-            hist[p1]++
-
-            if (i + 1 < totalPixels) {
-                rawNibbles[i + 1] = p2
-                hist[p2]++
+        // Giải mã trực tiếp từng điểm ảnh 4-bit qua phép nhân 17 (0 -> 0 đen, 15 -> 255 trắng)
+        // Tuyệt đối không dùng histogram percentile để tránh bóp nghẹt dynamic range của R503
+        for (pixelIdx in 0 until totalPixels) {
+            val compIdx = pixelIdx / 2
+            val rawNibble = if (compIdx < maxCompBytes) {
+                val b = rawBytes[compIdx].toInt() and 0xFF
+                if (pixelIdx % 2 == 0) ((b ushr 4) and 0x0F) else (b and 0x0F)
+            } else {
+                15 // Nền trắng quang học nếu thiếu byte
             }
-        }
 
-        // 2. Tính toán ngưỡng Histogram Percentile (3% - 97%) để tối ưu dải tương phản thực tế
-        val clipLower = (validPixels * 0.03).toInt()
-        val clipUpper = (validPixels * 0.97).toInt()
-
-        var cumSum = 0
-        var lowBound = -1
-        var highBound = 15
-
-        for (lvl in 0..15) {
-            cumSum += hist[lvl]
-            if (cumSum >= clipLower && lowBound == -1) {
-                lowBound = lvl
-            }
-            if (cumSum >= clipUpper) {
-                highBound = lvl
-                break
-            }
-        }
-
-        if (lowBound == -1) lowBound = 0
-        if (highBound <= lowBound) {
-            lowBound = 0
-            highBound = 15
-        }
-
-        val range = (highBound - lowBound).coerceAtLeast(1)
-
-        // 3. Kéo giãn tương phản tuyến tính chính xác theo đặc tính cảm biến R503
-        for (i in 0 until totalPixels) {
-            if (i >= validPixels) {
-                pixels[i] = if (!invert) 0xFFFFFFFF.toInt() else 0xFF000000.toInt()
-                continue
-            }
-            val raw = rawNibbles[i]
-
-            // Chuẩn hóa mức xám trong khoảng 0.0 .. 1.0 theo dải vân tay thực tế
-            val norm = ((raw - lowBound).toFloat() / range).coerceIn(0f, 1f)
+            val gray = (rawNibble * 17).coerceIn(0, 255)
 
             if (!invert) {
-                // CHUẨN QUANG HỌC NÉT CAO (Optical Clear - Chuẩn phòng Lab):
-                // R503 ra mức thấp (0..4) = Đỉnh vân (Ridges) -> Vẽ màu đen sẫm (gray thấp ~ 0..30)
-                // R503 ra mức cao (11..15) = Rãnh vân & Nền (Valleys) -> Vẽ màu trắng sáng (gray cao ~ 230..255)
-                val gray = (norm * 255f).toInt().coerceIn(0, 255)
-                pixels[i] = (0xFF shl 24) or (gray shl 16) or (gray shl 8) or gray
+                // CHUẨN QUANG HỌC R503 (Optical Clear): Đỉnh vân đen sẫm, rãnh vân trắng sáng
+                pixels[pixelIdx] = (0xFF shl 24) or (gray shl 16) or (gray shl 8) or gray
             } else {
-                // CHẾ ĐỘ BIOMETRIC NEON (High-Tech Scanner):
-                // Nền tối sâu, đường vân tay phát sáng vàng kim biometric nổi bật
-                val inv = 1f - norm
-                val r = (inv * 255f).toInt().coerceIn(0, 255)
-                val g = (inv * 210f).toInt().coerceIn(0, 255)
-                val b = (inv * 90f).toInt().coerceIn(0, 255)
-                pixels[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+                // CHẾ ĐỘ BIOMETRIC NEON: Đỉnh vân vàng kim biometric, nền đen sâu
+                val inv = 255 - gray
+                val r = inv
+                val g = (inv * 0.82f).toInt().coerceIn(0, 255)
+                val b = (inv * 0.35f).toInt().coerceIn(0, 255)
+                pixels[pixelIdx] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
             }
         }
 
-        bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
+        bitmap.setPixels(pixels, 0, actualW, 0, 0, actualW, actualH)
         return bitmap
     }
 
@@ -2699,7 +2766,7 @@ class MainActivity : AppCompatActivity() {
         var currentZoomLevel = 2f
 
         val tvMeta = TextView(this).apply {
-            text = "Độ phân giải: ${currentImageWidth} x ${currentImageHeight} px (508 DPI)\nChế độ: " + if (!isOpticalInvertMode) "Quang học chuẩn nét (Optical Clear)" else "Biometric Vàng Kim (Neon)"
+            text = "Độ phân giải: ${bmp.width} x ${bmp.height} px (508 DPI)\nChế độ: " + if (!isOpticalInvertMode) "Quang học chuẩn nét (Optical Clear)" else "Biometric Vàng Kim (Neon)"
             setTextColor(0xFFCBD5E1.toInt())
             textSize = 12f
             gravity = Gravity.CENTER
@@ -2720,7 +2787,7 @@ class MainActivity : AppCompatActivity() {
                 if (newBmp != null) {
                     imgView.setImageBitmap(newBmp)
                     card.setCardBackgroundColor(if (!isOpticalInvertMode) 0xFFFFFFFF.toInt() else 0xFF000000.toInt())
-                    tvMeta.text = "Độ phân giải: ${currentImageWidth} x ${currentImageHeight} px (508 DPI)\nChế độ: " + if (!isOpticalInvertMode) "Quang học chuẩn nét (Optical Clear)" else "Biometric Vàng Kim (Neon)"
+                    tvMeta.text = "Độ phân giải: ${newBmp.width} x ${newBmp.height} px (508 DPI)\nChế độ: " + if (!isOpticalInvertMode) "Quang học chuẩn nét (Optical Clear)" else "Biometric Vàng Kim (Neon)"
                     text = if (!isOpticalInvertMode) "🟡 Đổi sang Chế độ Biometric Neon" else "⚪ Đổi sang Chế độ Quang học chuẩn nét"
                 }
             }
@@ -2857,7 +2924,45 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun generateBmpByteArray(rawNibbleBytes: ByteArray, width: Int, height: Int): ByteArray {
-        val totalPixels = width * height
+        val actualW: Int
+        val actualH: Int
+        when (rawNibbleBytes.size) {
+            12800 -> {
+                actualW = 160
+                actualH = 160
+            }
+            18432 -> {
+                actualW = 192
+                actualH = 192
+            }
+            29952 -> {
+                actualW = 208
+                actualH = 288
+            }
+            else -> {
+                if (width * height / 2 == rawNibbleBytes.size && width > 0 && height > 0) {
+                    actualW = width
+                    actualH = height
+                } else {
+                    val totalPix = rawNibbleBytes.size * 2
+                    val side = Math.round(Math.sqrt(totalPix.toDouble())).toInt()
+                    if (side * side == totalPix && side > 0) {
+                        actualW = side
+                        actualH = side
+                    } else if (totalPix % 160 == 0 && totalPix > 0) {
+                        actualW = 160
+                        actualH = totalPix / 160
+                    } else if (totalPix % 192 == 0 && totalPix > 0) {
+                        actualW = 192
+                        actualH = totalPix / 192
+                    } else {
+                        actualW = width
+                        actualH = height
+                    }
+                }
+            }
+        }
+        val totalPixels = actualW * actualH
         val bmpHeaderSize = 14 + 40 + 1024 // 1078 bytes
         val bmpTotalSize = bmpHeaderSize + totalPixels
         val bmpData = ByteArray(bmpTotalSize)
@@ -2876,10 +2981,10 @@ class MainActivity : AppCompatActivity() {
 
         // Bitmap Info Header (40 bytes)
         bmpData[14] = 40
-        bmpData[18] = (width and 0xFF).toByte()
-        bmpData[19] = ((width ushr 8) and 0xFF).toByte()
-        bmpData[22] = (height and 0xFF).toByte()
-        bmpData[23] = ((height ushr 8) and 0xFF).toByte()
+        bmpData[18] = (actualW and 0xFF).toByte()
+        bmpData[19] = ((actualW ushr 8) and 0xFF).toByte()
+        bmpData[22] = (actualH and 0xFF).toByte()
+        bmpData[23] = ((actualH ushr 8) and 0xFF).toByte()
         bmpData[26] = 1 // Planes
         bmpData[28] = 8 // 8 bits per pixel (grayscale)
         bmpData[34] = (totalPixels and 0xFF).toByte()
@@ -2899,12 +3004,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Đảo ngược dòng quét Bottom-Up theo chuẩn Windows BMP (khớp test_r503.cpp & view_fingerprint.html)
-        val maxNibbles = Math.min(rawNibbleBytes.size * 2, totalPixels)
-        for (y in 0 until height) {
-            val srcY = height - 1 - y
-            val dstRowOffset = bmpHeaderSize + y * width
-            for (x in 0 until width) {
-                val pixelIdx = srcY * width + x
+        for (y in 0 until actualH) {
+            val srcY = actualH - 1 - y
+            val dstRowOffset = bmpHeaderSize + y * actualW
+            for (x in 0 until actualW) {
+                val pixelIdx = srcY * actualW + x
                 val compIdx = pixelIdx / 2
                 val valGray = if (compIdx < rawNibbleBytes.size) {
                     val b = rawNibbleBytes[compIdx].toInt() and 0xFF
