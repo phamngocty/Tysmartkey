@@ -1,26 +1,21 @@
 {
   "app": {
-    "versionCode": 4,
-    "versionName": "1.0.3",
-    "apkUrl": "https://github.com/phamngocty/Tysmartkey/releases/download/v1.0.3/TYMAP.apk",
-    "apkName": "wear-debug.apk",
+    "versionCode": 5,
+    "versionName": "1.0.4",
+    "apkUrl": "",
     "changelog": "• Cập nhật tính năng mới và cải thiện độ ổn định"
   },
   "firmware": {
-    "versionCode": 4,
-    "versionName": "1.0.3",
-    "binUrl": "https://github.com/phamngocty/Tysmartkey/releases/download/v1.0.3/firmware.bin",
-    "binName": "firmware.bin",
-    "secondaryBinUrl": "",
-    "secondaryBinName": "",
-    "oledBinUrl": "https://github.com/phamngocty/Tysmartkey/releases/download/v1.0.3/firmware.bin",
+    "versionCode": 5,
+    "versionName": "1.0.4",
+    "binUrl": "",
+    "oledBinUrl": "",
     "changelog": "• Cập nhật tính năng mới và cải thiện độ ổn định"
   },
   "firmware_oled": {
-    "versionCode": 4,
-    "versionName": "1.0.3",
-    "binUrl": "https://github.com/phamngocty/Tysmartkey/releases/download/v1.0.3/firmware.bin",
-    "binName": "firmware_oled.bin",
+    "versionCode": 5,
+    "versionName": "1.0.4",
+    "binUrl": "",
     "changelog": "• Cập nhật tính năng mới và cải thiện độ ổn định"
   }
 }
