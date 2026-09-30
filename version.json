@@ -2,20 +2,25 @@
   "app": {
     "versionCode": 5,
     "versionName": "1.0.4",
-    "apkUrl": "",
+    "apkUrl": "https://github.com/phamngocty/Tysmartkey/releases/download/v1.0.4/TYMAP.apk",
+    "apkName": "Tysmartkey_Phone.apk",
     "changelog": "• Cập nhật tính năng mới và cải thiện độ ổn định"
   },
   "firmware": {
     "versionCode": 5,
     "versionName": "1.0.4",
-    "binUrl": "",
-    "oledBinUrl": "",
+    "binUrl": "https://github.com/phamngocty/Tysmartkey/releases/download/v1.0.4/firmware.bin",
+    "binName": "firmware.bin",
+    "secondaryBinUrl": "https://github.com/phamngocty/Tysmartkey/releases/download/v1.0.4/Tysmartkey_WearOS.apk",
+    "secondaryBinName": "Tysmartkey_WearOS.apk",
+    "oledBinUrl": "https://github.com/phamngocty/Tysmartkey/releases/download/v1.0.4/Tysmartkey_WearOS.apk",
     "changelog": "• Cập nhật tính năng mới và cải thiện độ ổn định"
   },
   "firmware_oled": {
     "versionCode": 5,
     "versionName": "1.0.4",
-    "binUrl": "",
+    "binUrl": "https://github.com/phamngocty/Tysmartkey/releases/download/v1.0.4/Tysmartkey_WearOS.apk",
+    "binName": "Tysmartkey_WearOS.apk",
     "changelog": "• Cập nhật tính năng mới và cải thiện độ ổn định"
   }
 }
