@@ -5,6 +5,8 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.content.Context
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
@@ -75,6 +77,7 @@ class MainActivity : AppCompatActivity() {
     private var tvFinderRssiDesc: TextView? = null
     private var currentEstimatedDistance: Float = -1.0f
     private var currentBleRssi: Int = 0
+    private var smoothedRssi: Float = 0f
     private var cbAutoStartTab2: androidx.appcompat.widget.SwitchCompat? = null
     private var cbAutoConnectTab2: androidx.appcompat.widget.SwitchCompat? = null
     private var cbBackgroundRunTab2: androidx.appcompat.widget.SwitchCompat? = null
@@ -99,7 +102,7 @@ class MainActivity : AppCompatActivity() {
             if (isConnectedToVehicle() && isBleMode) {
                 BleManager.readRssi()
             }
-            handler.postDelayed(this, 3000)
+            handler.postDelayed(this, 1200)
         }
     }
 
@@ -544,6 +547,11 @@ class MainActivity : AppCompatActivity() {
             tvFpSensorStatus?.setTextColor(ContextCompat.getColor(this, R.color.gold_primary))
         }
 
+        val btnCopyBase64Quick = findViewById<View?>(R.id.btnCopyBase64Quick)
+        btnCopyBase64Quick?.setOnClickListener {
+            copyFingerprintBmpBase64ToClipboard()
+        }
+
         // 3. Công tắc bật/tắt nhanh chế độ truyền ảnh quang học BLE (tiết kiệm băng thông & vi xử lý)
         val swTabImageMode = findViewById<SwitchCompat?>(R.id.swTabImageMode)
         val tvTabImageModeSub = findViewById<TextView?>(R.id.tvTabImageModeSubtitle)
@@ -650,12 +658,13 @@ class MainActivity : AppCompatActivity() {
         BleManager.onRssiRead = { rssi ->
             runOnUiThread {
                 currentBleRssi = rssi
+                smoothedRssi = if (smoothedRssi == 0f) rssi.toFloat() else (smoothedRssi * 0.6f + rssi * 0.4f)
+                val effectiveRssi = Math.round(smoothedRssi)
                 tvBleRssiVal?.text = "$rssi dBm"
                 tvFinderRssiDesc?.text = "Tín hiệu Bluetooth: $rssi dBm"
-                val dist = Math.pow(10.0, (-59.0 - rssi) / 20.0)
-                val distClamped = Math.min(Math.max(dist, 0.5), 15.0).toFloat()
-                currentEstimatedDistance = distClamped
-                tvFinderDistance?.text = String.format(Locale.US, "Khoảng cách: ~ %.1f Mét", distClamped)
+                val dist = BleManager.calculateDistance(effectiveRssi)
+                currentEstimatedDistance = dist
+                tvFinderDistance?.text = String.format(Locale.US, "Khoảng cách: ~ %.1f Mét", dist)
                 syncStateToWatch()
             }
         }
@@ -1115,6 +1124,15 @@ class MainActivity : AppCompatActivity() {
                     synchronized(enrollImageBuffer) { enrollImageBuffer.setLength(0) }
                     lastRawFingerprintBytes = rawBytes
                     decodedBmp = decodeR503ImageToBitmap(rawBytes, actualW, actualH, isOpticalInvertMode)
+                    try {
+                        val bmpBytes = generateBmpByteArray(rawBytes, actualW, actualH)
+                        val b64Str = "data:image/bmp;base64," + android.util.Base64.encodeToString(bmpBytes, android.util.Base64.NO_WRAP)
+                        Log.i("FP_IMG_BASE64", "==================== [BẮT ĐẦU CHUỖI ẢNH BASE64 BMP R503] ====================")
+                        Log.i("FP_IMG_BASE64", b64Str)
+                        Log.i("FP_IMG_BASE64", "==================== [KẾT THÚC CHUỖI ẢNH BASE64 BMP R503] ====================")
+                    } catch (e: Exception) {
+                        Log.e("FP_IMG_BASE64", "Error logging base64 bmp", e)
+                    }
                 } else {
                     // ƯU TIÊN 2: Fallback giải mã chuỗi Base64 truyền thống
                     val fullB64: String
@@ -2864,8 +2882,19 @@ class MainActivity : AppCompatActivity() {
                 exportFingerprintImage("png", bmp)
             }
         }
+        val btnCopyBase64 = AppCompatButton(this).apply {
+            text = "📋 Chép Base64"
+            setBackgroundColor(0xFF0284C7.toInt())
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = 11f
+            layoutParams = LinearLayout.LayoutParams(0, 100, 1f).apply { setMargins(4, 0, 4, 0) }
+            setOnClickListener {
+                copyFingerprintBmpBase64ToClipboard()
+            }
+        }
         llExportRow.addView(btnSaveBmp)
         llExportRow.addView(btnSavePng)
+        llExportRow.addView(btnCopyBase64)
         layout.addView(llExportRow)
 
         val btnClose = AppCompatButton(this).apply {
@@ -2920,6 +2949,31 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Log.e("FP_EXPORT", "Export error", e)
             Toast.makeText(this, "Lỗi xuất file ảnh: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun copyFingerprintBmpBase64ToClipboard() {
+        val rawBytes = lastRawFingerprintBytes
+        if (rawBytes == null || rawBytes.isEmpty()) {
+            Toast.makeText(this, "Chưa có ảnh quét thực tế. Bấm 'Chụp Lăng Kính' để chụp!", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            val bmpBytes = generateBmpByteArray(rawBytes, currentImageWidth, currentImageHeight)
+            val b64Str = "data:image/bmp;base64," + android.util.Base64.encodeToString(bmpBytes, android.util.Base64.NO_WRAP)
+
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clip = ClipData.newPlainText("Fingerprint BMP Base64", b64Str)
+            clipboard.setPrimaryClip(clip)
+
+            Log.i("FP_IMG_BASE64", "==================== [BẮT ĐẦU CHUỖI ẢNH BASE64 BMP R503] ====================")
+            Log.i("FP_IMG_BASE64", b64Str)
+            Log.i("FP_IMG_BASE64", "==================== [KẾT THÚC CHUỖI ẢNH BASE64 BMP R503] ====================")
+
+            Toast.makeText(this, "📋 Đã sao chép chuỗi Base64 BMP! Mở tools/view_fingerprint.html để dán và xem ảnh.", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Log.e("FP_IMG", "Error copying base64", e)
+            Toast.makeText(this, "Lỗi sao chép Base64: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -3027,8 +3081,8 @@ class MainActivity : AppCompatActivity() {
         enrollImageBuffer.setLength(0)
         indexedImageChunks.clear()
         pbTabImageProgressRef?.visibility = View.VISIBLE
-        tvTabImageStatusRef?.text = "📸 Đang chờ chạm ngón tay..."
-        tvTabImageDescRef?.text = "Đèn cảm biến đang sáng tím. Hãy áp ngón tay và giữ êm trên R503."
+        tvTabImageStatusRef?.text = "📸 Đang chụp ảnh lăng kính..."
+        tvTabImageDescRef?.text = "Áp ngón tay lên R503 (nếu chụp vân tay) hoặc giữ mặt kính trống để soi lăng kính."
         triggerHapticFeedback()
         sendVehicleCommand("CAPTURE_FP_IMG")
     }
@@ -3568,6 +3622,8 @@ class MainActivity : AppCompatActivity() {
             btnConnect.text = getString(R.string.btn_connect_bt)
             handler.removeCallbacks(rssiPollRunnable)
             tvBleRssiVal?.text = "-- dBm"
+            smoothedRssi = 0f
+            currentEstimatedDistance = -1.0f
             if (isAutoConnectEnabled && !isManualDisconnect) {
                 handler.removeCallbacks(reconnectRunnable)
                 handler.postDelayed(reconnectRunnable, 4000)

@@ -70,8 +70,7 @@ object WatchSyncHelper {
                 if (currentDistanceMeters > 0f) {
                     currentDistanceMeters
                 } else {
-                    val d = Math.pow(10.0, (-59.0 - rssi) / 20.0)
-                    Math.min(Math.max(d, 0.5), 25.0).toFloat()
+                    BleManager.calculateDistance(rssi)
                 }
             } else {
                 -1.0f

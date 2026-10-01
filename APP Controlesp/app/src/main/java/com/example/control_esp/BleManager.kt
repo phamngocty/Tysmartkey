@@ -54,6 +54,26 @@ object BleManager {
         gattMap[mac]?.readRemoteRssi()
     }
 
+    /**
+     * Tính khoảng cách xấp xỉ từ chỉ số RSSI (mô hình Log-Distance Path Loss cải tiến)
+     * Đã hiệu chuẩn cho ESP32-C3 Smartkey công suất phát cao và vỏ bọc:
+     * - Vùng cận (< 0.5m khi đặt sát điện thoại cạnh ESP32-C3): RSSI >= -67 dBm -> hiển thị 0.1m - 0.4m
+     * - Điểm chuẩn 1.0m: RSSI ~ -68 dBm
+     * - Hệ số suy hao môi trường n = 2.3
+     */
+    fun calculateDistance(rssi: Int): Float {
+        if (rssi == 0) return -1.0f
+        if (rssi >= -52) return 0.1f
+        if (rssi >= -58) return 0.2f
+        if (rssi >= -64) return 0.3f
+        if (rssi >= -67) return 0.4f
+
+        val txPower = -68.0 // RSSI tham chiếu tại 1 mét
+        val n = 2.3         // Hệ số suy hao môi trường thực tế
+        val rawDist = Math.pow(10.0, (txPower - rssi) / (10.0 * n))
+        return Math.min(Math.max(rawDist, 0.1), 30.0).toFloat()
+    }
+
     fun init(context: Context) {
         val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         bluetoothAdapter = manager.adapter

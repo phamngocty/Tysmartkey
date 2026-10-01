@@ -1,0 +1,1372 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TYSMARTKEY - Hệ Thống Khóa Thông Minh Đa Phương Thức Xe Máy</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-base: #07090e;
+            --bg-surface: #0d131f;
+            --bg-card: rgba(18, 25, 40, 0.75);
+            --bg-card-hover: rgba(26, 36, 58, 0.9);
+            --border-card: rgba(0, 240, 255, 0.15);
+            --border-hover: rgba(0, 240, 255, 0.4);
+            
+            --cyan-neon: #00f0ff;
+            --emerald: #00ff88;
+            --amber: #ffaa00;
+            --crimson: #ff2a5f;
+            --purple: #b026ff;
+            --text-main: #f0f4fc;
+            --text-muted: #8e9bb0;
+            --font-main: 'Outfit', -apple-system, sans-serif;
+            --font-code: 'JetBrains Mono', monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            scroll-behavior: smooth;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            font-family: var(--font-main);
+            line-height: 1.6;
+            background-image: 
+                radial-gradient(circle at 15% 15%, rgba(0, 240, 255, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 85% 30%, rgba(176, 38, 255, 0.06) 0%, transparent 40%),
+                radial-gradient(circle at 50% 80%, rgba(0, 255, 136, 0.05) 0%, transparent 50%);
+            background-attachment: fixed;
+            overflow-x: hidden;
+        }
+
+        /* Container */
+        .container {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        /* 1. HERO HEADER */
+        header.hero {
+            padding: 70px 0 40px;
+            text-align: center;
+            position: relative;
+        }
+
+        .badge-row {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 24px;
+        }
+
+        .badge {
+            font-family: var(--font-code);
+            font-size: 0.8rem;
+            font-weight: 600;
+            padding: 6px 14px;
+            border-radius: 999px;
+            letter-spacing: 0.5px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border: 1px solid currentColor;
+            text-transform: uppercase;
+        }
+
+        .badge-cyan { color: var(--cyan-neon); background: rgba(0, 240, 255, 0.08); border-color: rgba(0, 240, 255, 0.3); }
+        .badge-emerald { color: var(--emerald); background: rgba(0, 255, 136, 0.08); border-color: rgba(0, 255, 136, 0.3); }
+        .badge-purple { color: var(--purple); background: rgba(176, 38, 255, 0.08); border-color: rgba(176, 38, 255, 0.3); }
+        .badge-amber { color: var(--amber); background: rgba(255, 170, 0, 0.08); border-color: rgba(255, 170, 0, 0.3); }
+
+        h1.brand-title {
+            font-size: clamp(2.5rem, 6vw, 4.5rem);
+            font-weight: 900;
+            letter-spacing: -1px;
+            line-height: 1.1;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, #ffffff 30%, var(--cyan-neon) 70%, var(--purple) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        p.hero-tagline {
+            font-size: clamp(1.1rem, 2.2vw, 1.4rem);
+            color: var(--text-muted);
+            max-width: 800px;
+            margin: 0 auto 36px;
+            font-weight: 300;
+        }
+
+        p.hero-tagline strong {
+            color: var(--text-main);
+            font-weight: 600;
+        }
+
+        /* Action Buttons */
+        .hero-actions {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 50px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 28px;
+            border-radius: 12px;
+            font-family: var(--font-main);
+            font-size: 1rem;
+            font-weight: 700;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+            border: 1px solid transparent;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--cyan-neon), #00a2ff);
+            color: #050b14;
+            box-shadow: 0 0 25px rgba(0, 240, 255, 0.35);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0 35px rgba(0, 240, 255, 0.6);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-main);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: var(--cyan-neon);
+            color: var(--cyan-neon);
+            transform: translateY(-2px);
+        }
+
+        .btn-outline {
+            background: transparent;
+            color: var(--text-muted);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+
+        .btn-outline:hover {
+            color: var(--text-main);
+            border-color: var(--text-main);
+        }
+
+        /* Key Metrics Grid */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 18px;
+            margin-top: 10px;
+        }
+
+        .metric-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 16px;
+            padding: 24px;
+            backdrop-filter: blur(12px);
+            text-align: left;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .metric-card:hover {
+            border-color: var(--border-hover);
+            transform: translateY(-3px);
+            box-shadow: 0 10px 30px -10px rgba(0, 240, 255, 0.2);
+        }
+
+        .metric-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: var(--cyan-neon);
+        }
+
+        .metric-card.emerald::before { background: var(--emerald); }
+        .metric-card.purple::before { background: var(--purple); }
+        .metric-card.amber::before { background: var(--amber); }
+
+        .metric-val {
+            font-family: var(--font-code);
+            font-size: 2.2rem;
+            font-weight: 800;
+            line-height: 1;
+            margin-bottom: 6px;
+            color: var(--text-main);
+        }
+
+        .metric-label {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+
+        /* 2. STICKY NAV BAR */
+        nav.nav-bar {
+            position: sticky;
+            top: 16px;
+            z-index: 100;
+            margin: 20px auto 40px;
+            max-width: 900px;
+            background: rgba(13, 19, 31, 0.85);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-card);
+            border-radius: 999px;
+            padding: 6px 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 15px 35px -5px rgba(0, 0, 0, 0.5);
+        }
+
+        .nav-links {
+            display: flex;
+            list-style: none;
+            gap: 4px;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+
+        .nav-links::-webkit-scrollbar { display: none; }
+
+        .nav-links a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 500;
+            padding: 8px 14px;
+            border-radius: 999px;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .nav-links a:hover, .nav-links a.active {
+            color: var(--cyan-neon);
+            background: rgba(0, 240, 255, 0.1);
+        }
+
+        .nav-cta {
+            padding-left: 10px;
+        }
+
+        .nav-cta .btn {
+            padding: 6px 16px;
+            font-size: 0.85rem;
+            border-radius: 999px;
+        }
+
+        /* Section Headings */
+        section {
+            padding: 60px 0;
+        }
+
+        .section-header {
+            text-align: center;
+            margin-bottom: 48px;
+        }
+
+        .section-tag {
+            font-family: var(--font-code);
+            color: var(--cyan-neon);
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            margin-bottom: 8px;
+            display: inline-block;
+        }
+
+        .section-title {
+            font-size: clamp(1.8rem, 3.5vw, 2.6rem);
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            margin-bottom: 12px;
+        }
+
+        .section-subtitle {
+            color: var(--text-muted);
+            max-width: 650px;
+            margin: 0 auto;
+            font-size: 1rem;
+        }
+
+        /* 3. CORE BREAKTHROUGHS (USPs) */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 24px;
+        }
+
+        .feature-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 20px;
+            padding: 30px;
+            backdrop-filter: blur(12px);
+            transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+            position: relative;
+        }
+
+        .feature-card:hover {
+            border-color: var(--border-hover);
+            transform: translateY(-5px);
+            background: var(--bg-card-hover);
+            box-shadow: 0 15px 35px -10px rgba(0, 240, 255, 0.2);
+        }
+
+        .feature-icon {
+            width: 52px;
+            height: 52px;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            background: rgba(0, 240, 255, 0.1);
+            color: var(--cyan-neon);
+            border: 1px solid rgba(0, 240, 255, 0.25);
+        }
+
+        .feature-card:nth-child(2) .feature-icon { background: rgba(0, 255, 136, 0.1); color: var(--emerald); border-color: rgba(0, 255, 136, 0.25); }
+        .feature-card:nth-child(3) .feature-icon { background: rgba(176, 38, 255, 0.1); color: var(--purple); border-color: rgba(176, 38, 255, 0.25); }
+        .feature-card:nth-child(4) .feature-icon { background: rgba(255, 170, 0, 0.1); color: var(--amber); border-color: rgba(255, 170, 0, 0.25); }
+
+        .feature-card h3 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin-bottom: 12px;
+            color: var(--text-main);
+        }
+
+        .feature-card p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+
+        /* 4. DETAILS MODULES & TABS */
+        .tabs-container {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-card);
+            border-radius: 24px;
+            padding: 36px;
+            backdrop-filter: blur(16px);
+        }
+
+        .tab-buttons {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 30px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 16px;
+            overflow-x: auto;
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-family: var(--font-main);
+            font-size: 1rem;
+            font-weight: 600;
+            padding: 10px 20px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-main);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .tab-btn.active {
+            color: var(--bg-base);
+            background: var(--cyan-neon);
+            box-shadow: 0 0 20px rgba(0, 240, 255, 0.4);
+        }
+
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.4s ease;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .tab-detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 32px;
+            align-items: center;
+        }
+
+        @media (max-width: 800px) {
+            .tab-detail-grid { grid-template-columns: 1fr; }
+        }
+
+        .tab-text h3 {
+            font-size: 1.6rem;
+            margin-bottom: 14px;
+            color: var(--text-main);
+        }
+
+        .feature-bullets {
+            list-style: none;
+            margin: 20px 0;
+        }
+
+        .feature-bullets li {
+            position: relative;
+            padding-left: 28px;
+            margin-bottom: 12px;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        .feature-bullets li::before {
+            content: '✓';
+            position: absolute;
+            left: 0;
+            top: 0;
+            color: var(--emerald);
+            font-weight: 800;
+        }
+
+        .tip-box {
+            background: rgba(0, 240, 255, 0.06);
+            border-left: 4px solid var(--cyan-neon);
+            border-radius: 8px;
+            padding: 14px 18px;
+            margin-top: 20px;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        .tip-box strong { color: var(--cyan-neon); }
+
+        /* Color Pill Palette (R503 LEDs) */
+        .color-palette {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .color-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 12px;
+            text-align: center;
+        }
+
+        .color-dot {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            margin: 0 auto 8px;
+            box-shadow: 0 0 12px currentColor;
+        }
+
+        .color-name { font-weight: 600; font-size: 0.85rem; margin-bottom: 2px; }
+        .color-meaning { font-size: 0.75rem; color: var(--text-muted); }
+
+        /* 5. COMPARISON TABLE */
+        .comparison-table-wrapper {
+            overflow-x: auto;
+            border-radius: 20px;
+            border: 1px solid var(--border-card);
+            background: var(--bg-surface);
+            box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.5);
+        }
+
+        table.comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 0.95rem;
+        }
+
+        table.comparison-table th, table.comparison-table td {
+            padding: 18px 24px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        table.comparison-table th {
+            background: rgba(255, 255, 255, 0.02);
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-size: 0.8rem;
+            letter-spacing: 1px;
+        }
+
+        table.comparison-table th.highlight-col,
+        table.comparison-table td.highlight-col {
+            background: rgba(0, 240, 255, 0.04);
+            color: var(--cyan-neon);
+            font-weight: 600;
+            border-left: 1px solid var(--border-card);
+            border-right: 1px solid var(--border-card);
+        }
+
+        table.comparison-table tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .status-check { color: var(--emerald); font-weight: bold; }
+        .status-cross { color: var(--crimson); font-weight: bold; }
+
+        /* 6. PINOUT & WIRING SCHEMATIC */
+        .wiring-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 28px;
+        }
+
+        @media (max-width: 900px) {
+            .wiring-container { grid-template-columns: 1fr; }
+        }
+
+        .wiring-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 20px;
+            padding: 28px;
+        }
+
+        .wiring-card h3 {
+            font-size: 1.3rem;
+            margin-bottom: 18px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .pinout-list {
+            list-style: none;
+        }
+
+        .pinout-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 14px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            font-family: var(--font-code);
+            font-size: 0.85rem;
+        }
+
+        .pinout-item:last-child { border-bottom: none; }
+
+        .pin-badge {
+            background: rgba(0, 240, 255, 0.12);
+            color: var(--cyan-neon);
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-weight: 700;
+        }
+
+        .pin-func { color: var(--text-main); font-weight: 500; font-family: var(--font-main); }
+        .pin-note { color: var(--text-muted); font-size: 0.75rem; }
+
+        .cable-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .wire-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            display: inline-block;
+            box-shadow: 0 0 6px currentColor;
+        }
+
+        /* 7. DOWNLOAD CENTER & OTA */
+        .download-box {
+            background: linear-gradient(135deg, rgba(0, 240, 255, 0.08) 0%, rgba(176, 38, 255, 0.08) 100%);
+            border: 1px solid var(--border-hover);
+            border-radius: 24px;
+            padding: 40px;
+            margin-bottom: 40px;
+        }
+
+        .download-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+            margin-top: 24px;
+        }
+
+        .dl-card {
+            background: var(--bg-surface);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 18px;
+            padding: 26px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            transition: all 0.3s ease;
+        }
+
+        .dl-card:hover {
+            border-color: var(--cyan-neon);
+            transform: translateY(-4px);
+            box-shadow: 0 15px 30px -10px rgba(0, 240, 255, 0.25);
+        }
+
+        .dl-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 16px;
+        }
+
+        .dl-title { font-size: 1.3rem; font-weight: 700; color: var(--text-main); }
+        .dl-ver {
+            font-family: var(--font-code);
+            font-size: 0.8rem;
+            color: var(--emerald);
+            background: rgba(0, 255, 136, 0.1);
+            padding: 4px 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(0, 255, 136, 0.3);
+        }
+
+        .dl-desc {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-bottom: 24px;
+            line-height: 1.6;
+        }
+
+        .dl-meta {
+            font-family: var(--font-code);
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 18px;
+            display: flex;
+            gap: 16px;
+        }
+
+        /* FAQ Accordion */
+        .faq-item {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 14px;
+            margin-bottom: 12px;
+            overflow: hidden;
+            transition: all 0.2s ease;
+        }
+
+        .faq-question {
+            padding: 20px 24px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 600;
+            font-size: 1.05rem;
+            user-select: none;
+        }
+
+        .faq-question:hover { color: var(--cyan-neon); }
+
+        .faq-answer {
+            padding: 0 24px 20px;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            display: none;
+            line-height: 1.6;
+        }
+
+        .faq-item.open .faq-answer { display: block; }
+        .faq-item.open .faq-arrow { transform: rotate(180deg); color: var(--cyan-neon); }
+
+        .faq-arrow {
+            transition: transform 0.2s ease;
+            font-size: 0.9rem;
+        }
+
+        /* Footer */
+        footer.site-footer {
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 60px 0 30px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-top: 60px;
+        }
+
+        .footer-brand {
+            font-size: 1.4rem;
+            font-weight: 800;
+            color: var(--text-main);
+            margin-bottom: 8px;
+        }
+
+        /* PRINT STYLESHEET */
+        @media print {
+            body {
+                background: white !important;
+                color: black !important;
+                font-size: 11pt;
+            }
+            nav.nav-bar, .hero-actions, .download-box, .btn {
+                display: none !important;
+            }
+            .metric-card, .feature-card, .tabs-container, .wiring-card, .comparison-table-wrapper {
+                border: 1px solid #ccc !important;
+                background: white !important;
+                color: black !important;
+                box-shadow: none !important;
+                break-inside: avoid;
+            }
+            h1, h2, h3, .metric-val {
+                color: black !important;
+                -webkit-text-fill-color: black !important;
+            }
+            .tab-content { display: block !important; }
+            .faq-answer { display: block !important; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 1. HERO HEADER -->
+    <header class="hero">
+        <div class="container">
+            <div class="badge-row">
+                <span class="badge badge-cyan">⚡ ESP32-C3 SuperMini RISC-V</span>
+                <span class="badge badge-emerald">🛡️ Chuẩn Xe Máy An Toàn</span>
+                <span class="badge badge-purple">🔒 Bluetooth BLE 5.0 Encrypted</span>
+                <span class="badge badge-amber">☔ Kháng Nước IP67 Lăng Kính</span>
+            </div>
+            <h1 class="brand-title">TYSMARTKEY PRO</h1>
+            <p class="hero-tagline">
+                Hệ thống khóa thông minh đa phương thức cho xe máy: <strong>Mở khóa vân tay 1 chạm</strong> trong 0.2s, <strong>điều khiển qua App Android</strong> mã hóa AES-128, <strong>quản lý nguồn 2 tầng</strong> không lo hết bình ắc quy.
+            </p>
+
+            <div class="hero-actions">
+                <a href="#download" class="btn btn-primary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                    Tải Bộ Cài Đặt (APK & BIN)
+                </a>
+                <a href="#wiring" class="btn btn-secondary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+                    Sơ Đồ Đấu Nối Xe
+                </a>
+                <button onclick="window.print()" class="btn btn-outline" title="Xuất tài liệu cẩm nang A4">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                    In Cẩm Nang PDF
+                </button>
+            </div>
+
+            <!-- Key Metrics Bar -->
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-val">0.2s</div>
+                    <div class="metric-label">Tốc độ mở khóa vân tay lăng kính</div>
+                </div>
+                <div class="metric-card emerald">
+                    <div class="metric-val">&lt; 15µA</div>
+                    <div class="metric-label">Dòng Deep Sleep (Đỗ xe cả tháng không kiệt bình)</div>
+                </div>
+                <div class="metric-card purple">
+                    <div class="metric-val">100%</div>
+                    <div class="metric-label">Relay Active-LOW chống giật đề nổ tự do</div>
+                </div>
+                <div class="metric-card amber">
+                    <div class="metric-val">Dual OTA</div>
+                    <div class="metric-label">Cập nhật BLE ngoài đường & WiFi tại nhà</div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- 2. STICKY NAV BAR -->
+    <nav class="nav-bar">
+        <ul class="nav-links">
+            <li><a href="#features" class="active">Công Nghệ</a></li>
+            <li><a href="#modules">Chức Năng</a></li>
+            <li><a href="#comparison">So Sánh</a></li>
+            <li><a href="#wiring">Sơ Đồ Đấu Nối</a></li>
+            <li><a href="#aura-led">Đèn Aura RGB</a></li>
+            <li><a href="#download">Tải Về & OTA</a></li>
+            <li><a href="#faq">Hỏi Đáp</a></li>
+        </ul>
+        <div class="nav-cta">
+            <a href="#download" class="btn btn-primary">Tải APK v1.0.2</a>
+        </div>
+    </nav>
+
+    <!-- 3. CORE BREAKTHROUGHS (USPs) -->
+    <section id="features">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-tag">Đột Phá Kỹ Thuật</span>
+                <h2 class="section-title">4 Trụ Cột Công Nghệ Chuẩn Thương Mại</h2>
+                <p class="section-subtitle">Loại bỏ hoàn toàn các nhược điểm của các bộ khóa tự chế, mang lại trải nghiệm êm ái, bảo mật và an toàn tối đa cho xe của bạn.</p>
+            </div>
+
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🧠</div>
+                    <h3>Vi Xử Lý RISC-V 160MHz</h3>
+                    <p>Trang bị chip ESP32-C3 SuperMini xử lý thuật toán mã hóa AES-128, xử lý tín hiệu ngắt RTC chỉ trong 15ms khi ngón tay vừa chạm lăng kính.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🛡️</div>
+                    <h3>Relay Kích Đề Active-LOW</h3>
+                    <p>GPIO 7 (Đề Starter) và GPIO 10 (Còi) điều khiển ở mức LOW, được kéo HIGH ngay trước khi cấu hình chân để triệt tiêu 100% xung giật tự đề nổ máy khi khởi động.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔋</div>
+                    <h3>Bảo Vệ Bình Ắc Quy 2 Tầng</h3>
+                    <p>Tự động chuyển từ Fast Advertising sang Power Saving Advertising sau 3 phút, và vào Deep Sleep sau 24h. Tích hợp cầu phân áp 100k/10k giám sát điện áp bình 12V chính xác tuyệt đối.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">☔</div>
+                    <h3>Chế Độ Chống Nước Mưa</h3>
+                    <p>Thuật toán lọc tiếp xúc lướt (Touch Hold Filter) và tự động khóa tạm thời khi bị nước xối liên tục lúc rửa xe hoặc đi mưa lớn, chống báo động giả.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 4. MODULES & DETAILS (TABS) -->
+    <section id="modules">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-tag">Tính Năng Toàn Diện</span>
+                <h2 class="section-title">Khám Phá Các Chế Độ Vận Hành</h2>
+                <p class="section-subtitle">Hệ thống đồng bộ hoàn hảo giữa cảm biến phần cứng trên xe và ứng dụng điều khiển di động.</p>
+            </div>
+
+            <div class="tabs-container">
+                <div class="tab-buttons">
+                    <button class="tab-btn active" onclick="switchTab(0)">🔑 Mở Khóa Đa Phương Thức</button>
+                    <button class="tab-btn" onclick="switchTab(1)">📱 Ứng Dụng Android Thông Minh</button>
+                    <button class="tab-btn" onclick="switchTab(2)">🚨 Chống Trộm & Tìm Xe</button>
+                    <button class="tab-btn" onclick="switchTab(3)">🌈 Tinh Chỉnh Đèn Aura RGB</button>
+                </div>
+
+                <!-- Tab 0: Mở Khóa -->
+                <div class="tab-content active">
+                    <div class="tab-detail-grid">
+                        <div class="tab-text">
+                            <h3>Chạm Là Khởi Động — Không Cần Chìa</h3>
+                            <p>Tysmartkey hỗ trợ mở khóa qua 3 phương thức song song, đảm bảo không bao giờ bạn bị kẹt lại trên đường:</p>
+                            <ul class="feature-bullets">
+                                <li><strong>Vân tay quang học R503:</strong> Chạm ngón tay đã đăng ký vào lăng kính, xe mở khóa nguồn ACC ngay lập tức (0.2s).</li>
+                                <li><strong>Điện thoại Android (BLE):</strong> Mở app bấm mở khóa từ xa trong bán kính 10-15m mà không cần chạm vào xe.</li>
+                                <li><strong>Chìa khóa cơ zin theo xe:</strong> Tiếp điểm Relay 1 đấu song song với ổ khóa cơ, bạn vẫn có thể mở bằng chìa khóa truyền thống trong trường hợp khẩn cấp.</li>
+                            </ul>
+                            <div class="tip-box">
+                                💡 <strong>Mẹo thực chiến:</strong> Sau khi mở khóa ACC, bạn có thể bấm giữ nút Đề trên App Android hoặc quẹt vân tay đề nổ để xe tự kích đề 1.5 giây mà không cần bấm nút đề trên ghi-đông!
+                            </div>
+                        </div>
+                        <div class="tab-media">
+                            <div style="background: rgba(0,0,0,0.4); border: 1px solid var(--border-card); border-radius: 16px; padding: 24px; text-align: center;">
+                                <div style="font-size: 3.5rem; margin-bottom: 12px;">👆 ✨</div>
+                                <h4 style="color: var(--cyan-neon); margin-bottom: 8px;">Cảm Biến Grow R503 Kim Loại</h4>
+                                <p style="font-size: 0.85rem; color: var(--text-muted);">Kháng nước IP67, tích hợp vòng LED 360° phản hồi trạng thái xe, vỏ ren ốc M22 dễ dàng khoan gắn ghi đông hoặc ốp nhựa xe máy.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 1: Android App -->
+                <div class="tab-content">
+                    <div class="tab-detail-grid">
+                        <div class="tab-text">
+                            <h3>Bảo Mật Ghép Đôi Passkey 6 Số</h3>
+                            <p>Ứng dụng di động viết bằng Kotlin hiện đại, kết nối trực tiếp với ESP32-C3 qua giao thức NimBLE tiết kiệm pin:</p>
+                            <ul class="feature-bullets">
+                                <li><strong>Bảo mật AES-128:</strong> Chỉ điện thoại đã nhập đúng mã Passkey (mặc định <code>271000</code>) mới được phép ra lệnh.</li>
+                                <li><strong>Giám sát điện áp bình 12V:</strong> Hiển thị điện áp thời gian thực, có nút cân chỉnh vi sai để khớp 100% với đồng hồ vạn năng VOM.</li>
+                                <li><strong>Đăng ký & Quản lý vân tay:</strong> Thêm, đổi tên thành viên trong gia đình hoặc xóa vân tay theo ý muốn trực tiếp trên app.</li>
+                                <li><strong>Tự động kiểm tra bản cập nhật:</strong> Tự phát hiện phiên bản APK mới và Firmware BIN mới qua mạng.</li>
+                            </ul>
+                        </div>
+                        <div class="tab-media">
+                            <div style="background: rgba(0,0,0,0.4); border: 1px solid var(--border-card); border-radius: 16px; padding: 24px; text-align: center;">
+                                <div style="font-size: 3.5rem; margin-bottom: 12px;">📱 ⚡</div>
+                                <h4 style="color: var(--emerald); margin-bottom: 8px;">App Android Tysmartkey</h4>
+                                <p style="font-size: 0.85rem; color: var(--text-muted);">Giao diện Dark Mode tương phản cao, thao tác 1 chạm bật/tắt ACC, đề máy, định vị xe trong bãi và chỉnh màu đèn hào quang.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Chống trộm -->
+                <div class="tab-content">
+                    <div class="tab-detail-grid">
+                        <div class="tab-text">
+                            <h3>Báo Động Rung Lắc & Tìm Xe Trong Bãi</h3>
+                            <p>Hệ thống giám sát chiếc xe của bạn 24/7 với cảm biến rung SW-420 và bộ thu sóng vô tuyến RF 433MHz:</p>
+                            <ul class="feature-bullets">
+                                <li><strong>Bật/Tắt chống dắt trên App:</strong> Khi kích hoạt, nếu có kẻ gian dắt xe hoặc rung lắc mạnh, còi xe sẽ hú ngắt quãng cảnh báo.</li>
+                                <li><strong>Cảnh báo quẹt sai vân tay:</strong> Kẻ gian cố tình thử ngón tay quá 5 lần liên tiếp sẽ bị khóa quét 30 giây và kích hoạt còi báo động.</li>
+                                <li><strong>Tìm xe trong bãi xe rộng:</strong> Nhấn nút trên Remote RF 433MHz, xe sẽ bíp còi và nháy đèn xi-nhan giúp bạn xác định vị trí xe tức thì.</li>
+                            </ul>
+                        </div>
+                        <div class="tab-media">
+                            <div style="background: rgba(0,0,0,0.4); border: 1px solid var(--border-card); border-radius: 16px; padding: 24px; text-align: center;">
+                                <div style="font-size: 3.5rem; margin-bottom: 12px;">🚨 🔊</div>
+                                <h4 style="color: var(--crimson); margin-bottom: 8px;">Cảnh Báo Chống Trộm Động</h4>
+                                <p style="font-size: 0.85rem; color: var(--text-muted);">Khử giật xung relay còi, báo động thông minh theo cấp độ, bảo vệ an toàn cho bình xe và tránh làm phiền hàng xóm.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 3: Đèn Aura RGB -->
+                <div class="tab-content" id="aura-led">
+                    <div class="tab-text" style="max-width: 800px; margin: 0 auto; text-align: center;">
+                        <h3>Vòng LED Hào Quang Aura RGB 360°</h3>
+                        <p style="color: var(--text-muted); margin-bottom: 24px;">Bạn có thể tùy biến màu sắc và kiểu nháy (Thở, Nhấp nháy, Sáng tĩnh, Tắt) cho 4 sự kiện của xe: Khi Mở Khóa, Khi Khóa Xe, Khi Quẹt Đúng và Khi Báo Lỗi.</p>
+                        
+                        <div class="color-palette">
+                            <div class="color-card">
+                                <div class="color-dot" style="color: #007aff; background: #007aff;"></div>
+                                <div class="color-name">Xanh Dương</div>
+                                <div class="color-meaning">Xe Đang Bật Điện</div>
+                            </div>
+                            <div class="color-card">
+                                <div class="color-dot" style="color: #34c759; background: #34c759;"></div>
+                                <div class="color-name">Xanh Lá</div>
+                                <div class="color-meaning">Nhận Vân Tay Chuẩn</div>
+                            </div>
+                            <div class="color-card">
+                                <div class="color-dot" style="color: #ff2d55; background: #ff2d55;"></div>
+                                <div class="color-name">Đỏ Sport</div>
+                                <div class="color-meaning">Quẹt Sai / Báo Động</div>
+                            </div>
+                            <div class="color-card">
+                                <div class="color-dot" style="color: #af52de; background: #af52de;"></div>
+                                <div class="color-name">Tím Neon</div>
+                                <div class="color-meaning">Đang Nạp OTA / Ghép Đôi</div>
+                            </div>
+                            <div class="color-card">
+                                <div class="color-dot" style="color: #ffcc00; background: #ffcc00;"></div>
+                                <div class="color-name">Vàng Gold</div>
+                                <div class="color-meaning">Luxury Luxury Style</div>
+                            </div>
+                            <div class="color-card">
+                                <div class="color-dot" style="color: #00f5d4; background: #00f5d4;"></div>
+                                <div class="color-name">Xanh Cyan</div>
+                                <div class="color-meaning">Hiện Đại Trẻ Trung</div>
+                            </div>
+                            <div class="color-card">
+                                <div class="color-dot" style="color: #ffffff; background: #ffffff;"></div>
+                                <div class="color-name">Trắng Tinh Khôi</div>
+                                <div class="color-meaning">Sáng Tối Đa Ban Đêm</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 5. COMPARISON TABLE -->
+    <section id="comparison">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-tag">Bảng So Sánh</span>
+                <h2 class="section-title">Tại Sao Nên Chọn Tysmartkey Pro?</h2>
+                <p class="section-subtitle">So sánh chi tiết các thông số kỹ thuật cốt lõi với khóa cơ thông thường và các bộ smartkey tự chế trôi nổi.</p>
+            </div>
+
+            <div class="comparison-table-wrapper">
+                <table class="comparison-table">
+                    <thead>
+                        <tr>
+                            <th>Tiêu Chí Kỹ Thuật</th>
+                            <th>Khóa Cơ Zin Truyền Thống</th>
+                            <th>Smartkey Tự Chế Thị Trường</th>
+                            <th class="highlight-col">TYSMARTKEY PRO (HỆ THỐNG NÀY)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Khởi động xe</strong></td>
+                            <td>Phải cắm chìa khóa cơ</td>
+                            <td>Chỉ dùng thẻ từ hoặc remote</td>
+                            <td class="highlight-col"><span class="status-check">✓</span> Chạm vân tay 0.2s + App Bluetooth + Chìa cơ</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Tiêu thụ điện khi đỗ xe</strong></td>
+                            <td>0 mA (Ngắt hoàn toàn)</td>
+                            <td>15 - 40 mA (Rất nhanh cạn bình)</td>
+                            <td class="highlight-col"><span class="status-check">✓</span> &lt; 15 µA (Ngủ sâu Deep Sleep, đỗ cả tháng)</td>
+                        </tr>
+                        <tr>
+                            <td><strong>An toàn rơ-le kích đề</strong></td>
+                            <td>Bấm công tắc ghi-đông</td>
+                            <td>Dễ bị giật xung tự đề khi cắm điện</td>
+                            <td class="highlight-col"><span class="status-check">✓</span> Active-LOW Glitch-Free, tự ngắt sau 1.5s</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Chống trộm bẻ khóa ổ</strong></td>
+                            <td><span class="status-cross">✗</span> Dễ bị bẻ bằng đoản chìa</td>
+                            <td>Có còi hú đơn giản</td>
+                            <td class="highlight-col"><span class="status-check">✓</span> Cảm biến rung SW-420 + Còi + Khóa quẹt sai</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Kháng nước khi đi mưa/rửa xe</strong></td>
+                            <td>Tốt</td>
+                            <td><span class="status-cross">✗</span> Dễ chập hoặc chạm cảm biến giả</td>
+                            <td class="highlight-col"><span class="status-check">✓</span> Cảm biến IP67 + Thuật toán Anti-Rain chống dội</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Nâng cấp phần mềm (OTA)</strong></td>
+                            <td>Không thể</td>
+                            <td><span class="status-cross">✗</span> Phải tháo vỏ xe cắm dây nạp</td>
+                            <td class="highlight-col"><span class="status-check">✓</span> Nạp OTA qua sóng Bluetooth ngay trên điện thoại</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Đo điện áp bình ắc quy</strong></td>
+                            <td>Không có</td>
+                            <td>Sai số lớn, không cân chỉnh được</td>
+                            <td class="highlight-col"><span class="status-check">✓</span> ADC GPIO 2 chuẩn 100k/10k, cân chỉnh vi sai qua App</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- 6. WIRING SCHEMATIC & INSTALLATION -->
+    <section id="wiring">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-tag">Hướng Dẫn Kỹ Thuật</span>
+                <h2 class="section-title">Sơ Đồ Đấu Nối Chuẩn Công Nghiệp</h2>
+                <p class="section-subtitle">Bảng Golden Pinout của ESP32-C3 SuperMini chống hoàn toàn lỗi kẹt ROM Bootloader và giật xung khi khởi động.</p>
+            </div>
+
+            <div class="wiring-container">
+                <!-- Bảng chân GPIO -->
+                <div class="wiring-card">
+                    <h3><span style="color: var(--cyan-neon);">🔌</span> Bảng Pinout ESP32-C3</h3>
+                    <ul class="pinout-list">
+                        <li class="pinout-item">
+                            <div>
+                                <span class="pin-badge">GPIO 6</span>
+                                <span class="pin-func">Relay 1 (Khóa điện ACC)</span>
+                            </div>
+                            <span class="pin-note">Đấu song song ổ khóa cơ xe</span>
+                        </li>
+                        <li class="pinout-item">
+                            <div>
+                                <span class="pin-badge">GPIO 7</span>
+                                <span class="pin-func">Relay 2 (Nút Đề Starter)</span>
+                            </div>
+                            <span class="pin-note">Active-LOW: 0V đề, 3.3V ngắt</span>
+                        </li>
+                        <li class="pinout-item">
+                            <div>
+                                <span class="pin-badge">GPIO 10</span>
+                                <span class="pin-func">Relay 3 (Còi & Xi-Nhan)</span>
+                            </div>
+                            <span class="pin-note">Active-LOW: Báo động & Tìm xe</span>
+                        </li>
+                        <li class="pinout-item">
+                            <div>
+                                <span class="pin-badge">GPIO 3</span>
+                                <span class="pin-func">R503 WAKEUP (Dây Xanh Dương)</span>
+                            </div>
+                            <span class="pin-note">Ngắt RTC Wakeup (Chạm = 0V)</span>
+                        </li>
+                        <li class="pinout-item">
+                            <div>
+                                <span class="pin-badge">GPIO 4</span>
+                                <span class="pin-func">Cảm biến rung SW-420 (DO)</span>
+                            </div>
+                            <span class="pin-note">Ngắt RTC Wakeup mức HIGH</span>
+                        </li>
+                        <li class="pinout-item">
+                            <div>
+                                <span class="pin-badge">GPIO 5</span>
+                                <span class="pin-func">Module RF 433MHz (Chân VT)</span>
+                            </div>
+                            <span class="pin-note">Ngắt RTC Wakeup mức HIGH</span>
+                        </li>
+                        <li class="pinout-item">
+                            <div>
+                                <span class="pin-badge">GPIO 0 & 1</span>
+                                <span class="pin-func">UART1: RX (Vàng) & TX (Xanh lá)</span>
+                            </div>
+                            <span class="pin-note">Giao tiếp R503 tốc độ 57600bps</span>
+                        </li>
+                        <li class="pinout-item">
+                            <div>
+                                <span class="pin-badge">GPIO 2</span>
+                                <span class="pin-func">Đo Bình Ắc Quy 12V (ADC)</span>
+                            </div>
+                            <span class="pin-note">Cầu phân áp R1=100k, R2=10k</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Bảng màu dây R503 -->
+                <div class="wiring-card">
+                    <h3><span style="color: var(--emerald);">🌈</span> Thứ Tự Cáp 6 Dây Cảm Biến R503</h3>
+                    <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 16px;">Đầu cắm MX1.0mm 6-Pin của Hangzhou Grow R503 / R503-M22:</p>
+                    
+                    <div class="cable-row">
+                        <span class="wire-dot" style="color: #ff2d55; background: #ff2d55;"></span>
+                        <strong style="width: 100px;">1. ĐỎ</strong>
+                        <span style="color: var(--text-muted); font-size: 0.85rem;">VCC 3.3VDC ổn định sau mạch Buck</span>
+                    </div>
+                    <div class="cable-row">
+                        <span class="wire-dot" style="color: #555555; background: #111111; border: 1px solid #777;"></span>
+                        <strong style="width: 100px;">2. ĐEN</strong>
+                        <span style="color: var(--text-muted); font-size: 0.85rem;">GND - Nối Mass chung hệ thống</span>
+                    </div>
+                    <div class="cable-row">
+                        <span class="wire-dot" style="color: #ffcc00; background: #ffcc00;"></span>
+                        <strong style="width: 100px;">3. VÀNG</strong>
+                        <span style="color: var(--text-muted); font-size: 0.85rem;">TXD Sensor ➜ Nối vào GPIO 0 (RX1 ESP32)</span>
+                    </div>
+                    <div class="cable-row">
+                        <span class="wire-dot" style="color: #34c759; background: #34c759;"></span>
+                        <strong style="width: 100px;">4. XANH LÁ</strong>
+                        <span style="color: var(--text-muted); font-size: 0.85rem;">RXD Sensor ➜ Nối vào GPIO 1 (TX1 ESP32)</span>
+                    </div>
+                    <div class="cable-row">
+                        <span class="wire-dot" style="color: #007aff; background: #007aff;"></span>
+                        <strong style="width: 100px;">5. XANH DƯƠNG</strong>
+                        <span style="color: var(--text-muted); font-size: 0.85rem;">WAKEUP ➜ Nối vào GPIO 3 (Active-LOW 0V)</span>
+                    </div>
+                    <div class="cable-row">
+                        <span class="wire-dot" style="color: #ffffff; background: #ffffff;"></span>
+                        <strong style="width: 100px;">6. TRẮNG</strong>
+                        <span style="color: var(--text-muted); font-size: 0.85rem;">3.3V Touch Power ➜ Nối chung nguồn 3.3V</span>
+                    </div>
+
+                    <div class="tip-box" style="margin-top: 24px; border-left-color: var(--amber);">
+                        ⚠️ <strong>Lưu ý mạch đo ắc quy (GPIO 2):</strong> Nên hàn thêm 1 tụ gốm <strong>100nF (104)</strong> song song với điện trở 10k (tức từ GPIO 2 xuống GND) để lọc phẳng xung cao tần RF khi Bluetooth phát sóng!
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 7. DOWNLOAD CENTER & OTA GUIDE -->
+    <section id="download">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-tag">Tải Về & Cập Nhật</span>
+                <h2 class="section-title">Trung Tâm Tải Về & Phân Phối Bản Cập Nhật</h2>
+                <p class="section-subtitle">Tải trực tiếp bộ cài đặt Android mới nhất và file firmware nhị phân chuẩn cho vi điều khiển ESP32-C3.</p>
+            </div>
+
+            <div class="download-box">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+                    <div>
+                        <h3 style="font-size: 1.5rem; margin-bottom: 4px;">Phiên Bản Phát Hành Mới Nhất (Release v1.0.2)</h3>
+                        <p style="color: var(--text-muted); font-size: 0.9rem;">Đã bao gồm bản sửa lỗi ADC 12V, Relay Active-LOW chống giật và Dual OTA.</p>
+                    </div>
+                    <span class="badge badge-emerald" style="font-size: 0.9rem;">BUILD 3 - SẴN SÀNG SỬ DỤNG</span>
+                </div>
+
+                <div class="download-grid">
+                    <!-- Download APK Card -->
+                    <div class="dl-card">
+                        <div>
+                            <div class="dl-header">
+                                <div class="dl-title">📱 App Android Control</div>
+                                <span class="dl-ver">v1.0.2 (Build 3)</span>
+                            </div>
+                            <p class="dl-desc">Ứng dụng điều khiển khóa xe, tìm xe, quản lý vân tay và tinh chỉnh màu đèn nhẫn RGB qua Bluetooth LE.</p>
+                            <div class="dl-meta">
+                                <span>📦 Dung lượng: ~13.6 MB</span>
+                                <span>📱 Android 7.0+</span>
+                            </div>
+                        </div>
+                        <a href="app-debug.apk" download="app-debug.apk" class="btn btn-primary" style="justify-content: center; width: 100%;">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                            Tải File APK (app-debug.apk)
+                        </a>
+                    </div>
+
+                    <!-- Download BIN Card -->
+                    <div class="dl-card">
+                        <div>
+                            <div class="dl-header">
+                                <div class="dl-title">⚡ Firmware ESP32-C3</div>
+                                <span class="dl-ver">FW v1.0.2 (Build 3)</span>
+                            </div>
+                            <p class="dl-desc">File nhị phân đã biên dịch hoàn chỉnh cho bo mạch ESP32-C3 SuperMini, sẵn sàng nạp qua BLE OTA hoặc cáp USB.</p>
+                            <div class="dl-meta">
+                                <span>📦 Dung lượng: ~1.2 MB</span>
+                                <span>⚙️ Flash 4MB Partition</span>
+                            </div>
+                        </div>
+                        <a href="firmware.bin" download="firmware.bin" class="btn btn-secondary" style="justify-content: center; width: 100%; border-color: var(--cyan-neon); color: var(--cyan-neon);">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                            Tải File Firmware (firmware.bin)
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Hướng dẫn nạp OTA -->
+                <div style="margin-top: 36px; padding-top: 24px; border-top: 1px solid rgba(255, 255, 255, 0.1);">
+                    <h4 style="color: var(--cyan-neon); margin-bottom: 12px; font-size: 1.1rem;">🚀 Hướng Dẫn Cập Nhật Firmware Không Cần Tháo Vỏ Xe:</h4>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; font-size: 0.9rem; color: var(--text-muted);">
+                        <div style="background: rgba(0,0,0,0.3); padding: 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.06);">
+                            <strong style="color: var(--text-main);">Cách 1: Nạp qua sóng Bluetooth (BLE OTA)</strong><br>
+                            Mở App Tysmartkey trên Android ➜ Kết nối Bluetooth với xe ➜ Vào Cài đặt ➜ Chọn mục Cập nhật Firmware ➜ Bấm "Tải & Nạp OTA". Điện thoại sẽ tự động truyền từng khối byte qua BLE trong ~45 giây.
+                        </div>
+                        <div style="background: rgba(0,0,0,0.3); padding: 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.06);">
+                            <strong style="color: var(--text-main);">Cách 2: Nạp qua WiFi gia đình hoặc Hotspot 4G</strong><br>
+                            Bật điểm phát sóng WiFi 4G trên điện thoại hoặc đỗ xe gần WiFi nhà ➜ Gửi lệnh BLE: <code>&lt;MÃ_PIN&gt;|WIFI_OTA|Tên_WiFi|Mật_Khẩu</code>. ESP32 sẽ tự kéo file .bin về nạp và khởi động lại.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FAQ -->
+    <section id="faq">
+        <div class="container" style="max-width: 850px;">
+            <div class="section-header">
+                <span class="section-tag">Giải Đáp Thắc Mắc</span>
+                <h2 class="section-title">Câu Hỏi Thường Gặp (FAQ)</h2>
+            </div>
+
+            <div class="faq-item open">
+                <div class="faq-question" onclick="toggleFaq(this)">
+                    <span>1. Nếu để xe cả tháng không đi thì bình ắc quy có bị kiệt không?</span>
+                    <span class="faq-arrow">▼</span>
+                </div>
+                <div class="faq-answer">
+                    Hoàn toàn không. Sau 24 giờ không có thao tác, hệ thống tự động đưa vi xử lý ESP32-C3 vào chế độ ngủ sâu (Deep Sleep) với dòng tiêu thụ dưới <strong>15µA</strong> (nhỏ hơn mức dòng tự xả tự nhiên của bình ắc quy). Khi bạn chạm tay vào cảm biến vân tay R503 hoặc xe bị rung lắc, chân ngắt RTC phần cứng sẽ đánh thức MCU trong chưa đầy 15 mili-giây.
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <div class="faq-question" onclick="toggleFaq(this)">
+                    <span>2. Mã Passkey bảo mật Bluetooth mặc định là gì? Đổi được không?</span>
+                    <span class="faq-arrow">▼</span>
+                </div>
+                <div class="faq-answer">
+                    Mã PIN bảo mật mặc định của hệ thống là <code>271000</code>. Bạn hoàn toàn có thể đổi mật khẩu mới trong phần Cài Đặt của ứng dụng Android. Mã này được lưu trong phân vùng Flash NVS mã hóa của ESP32 và không bị mất khi tháo cọc bình ắc quy.
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <div class="faq-question" onclick="toggleFaq(this)">
+                    <span>3. Đi trời mưa to hoặc rửa xe vòi cao áp cảm biến có bị kích hoạt bậy không?</span>
+                    <span class="faq-arrow">▼</span>
+                </div>
+                <div class="faq-answer">
+                    Cảm biến R503 có chuẩn chống nước lăng kính IP67. Ngoài ra, firmware Tysmartkey đã được lập trình cơ chế <strong>Anti-Rain</strong>: giọt nước chảy lướt qua dưới 500ms sẽ bị loại bỏ hoàn toàn. Nếu phát hiện quẹt sai liên tục 5 lần do nước ngập mặt lăng kính, hệ thống sẽ tự động tạm khóa cảm biến 30 giây để chống làm phiền.
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <div class="faq-question" onclick="toggleFaq(this)">
+                    <span>4. Mất điện thoại hoặc hết pin điện thoại thì mở xe như thế nào?</span>
+                    <span class="faq-arrow">▼</span>
+                </div>
+                <div class="faq-answer">
+                    Bạn luôn có thể mở khóa xe bằng cách quẹt vân tay đã lưu trên cảm biến R503. Ngoài ra, hệ thống relay ACC đấu song song với ổ khóa cơ zin, nên bạn vẫn có thể cắm chìa khóa cơ bật xe và đi bình thường.
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer class="site-footer">
+        <div class="container">
+            <div class="footer-brand">TYSMARTKEY MOTORCYCLE IOT</div>
+            <p>Giải pháp khóa thông minh nhúng ESP32-C3 & GROW R503 chuyên nghiệp cho mọi dòng xe máy.</p>
+            <p style="margin-top: 16px; font-size: 0.8rem; color: #55627a;">
+                Bản quyền © 2026 Tysmartkey Project. Thiết kế chuẩn thương mại & phát hành nội bộ.
+            </p>
+        </div>
+    </footer>
+
+    <!-- INTERACTION SCRIPT -->
+    <script>
+        // Chuyển Tab tính năng
+        function switchTab(idx) {
+            const btns = document.querySelectorAll('.tab-btn');
+            const contents = document.querySelectorAll('.tab-content');
+            btns.forEach((b, i) => b.classList.toggle('active', i === idx));
+            contents.forEach((c, i) => c.classList.toggle('active', i === idx));
+        }
+
+        // Đóng mở FAQ
+        function toggleFaq(el) {
+            const item = el.parentElement;
+            item.classList.toggle('open');
+        }
+
+        // Active link menu khi cuộn
+        window.addEventListener('scroll', () => {
+            const sections = document.querySelectorAll('section, header');
+            const navLinks = document.querySelectorAll('.nav-links a');
+            let current = '';
+            sections.forEach(sec => {
+                const top = sec.offsetTop - 120;
+                if (window.pageYOffset >= top) {
+                    current = sec.getAttribute('id') || '';
+                }
+            });
+            navLinks.forEach(link => {
+                link.classList.remove('active');
+                if (current && link.getAttribute('href') === '#' + current) {
+                    link.classList.add('active');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

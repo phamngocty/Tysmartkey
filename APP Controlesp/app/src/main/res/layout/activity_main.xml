@@ -962,6 +962,18 @@
                             android:textStyle="bold" />
                     </LinearLayout>
 
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnCopyBase64Quick"
+                        android:layout_width="match_parent"
+                        android:layout_height="36dp"
+                        android:layout_marginTop="8dp"
+                        android:background="@drawable/header_icon_btn_bg"
+                        android:text="📋 Sao Chép Base64 BMP (HTML Viewer)"
+                        android:textAllCaps="false"
+                        android:textColor="@color/accent_cyan"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+
                     <!-- Quick Image Stream Mode Toggle Capsule -->
                     <LinearLayout
                         android:id="@+id/btnToggleImageMode"
