@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="8dp"
+    android:background="@drawable/card_telemetry_bg"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:padding="12dp">
+
+    <!-- Warning Icon -->
+    <ImageView
+        android:layout_width="22dp"
+        android:layout_height="22dp"
+        android:src="@drawable/ic_fingerprint"
+        app:tint="@color/accent_danger"
+        android:layout_marginEnd="10dp" />
+
+    <!-- Info Column -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/tvIntruderTime"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="14:25:30 02/10/2026"
+            android:textColor="@color/white"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvIntruderDetails"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="fp_1727823900.raw • 12.8 KB"
+            android:textColor="@color/text_secondary"
+            android:textSize="10sp"
+            android:fontFamily="monospace" />
+    </LinearLayout>
+
+    <!-- Action Button -->
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/btnFetchIntruderItem"
+        android:layout_width="wrap_content"
+        android:layout_height="32dp"
+        android:background="@drawable/header_icon_btn_bg"
+        android:paddingHorizontal="12dp"
+        android:text="🔍 Xem Ảnh"
+        android:textAllCaps="false"
+        android:textColor="@color/gold_primary"
+        android:textSize="11sp"
+        android:textStyle="bold" />
+
+</LinearLayout>

@@ -1305,6 +1305,70 @@
                         android:textStyle="bold" />
                 </LinearLayout>
 
+                <!-- CARD: BẮT QUẢ TANG VÂN TAY LẠ (INTRUDER AUDIT) -->
+                <LinearLayout
+                    android:id="@+id/btnIntruderAudit"
+                    android:layout_width="match_parent"
+                    android:layout_height="75dp"
+                    android:layout_marginBottom="16dp"
+                    android:background="@drawable/card_cyber_bg"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:padding="12dp"
+                    android:clickable="true"
+                    android:focusable="true">
+
+                    <FrameLayout
+                        android:layout_width="38dp"
+                        android:layout_height="38dp"
+                        android:background="@drawable/avatar_fp_bg">
+
+                        <ImageView
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:layout_gravity="center"
+                            android:src="@drawable/ic_shield"
+                            app:tint="@color/accent_danger" />
+                    </FrameLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="12dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Bắt Quả Tang Vân Tay Lạ"
+                            android:textColor="@color/white"
+                            android:textSize="13sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tvIntruderBadge"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Chưa có dữ liệu vi phạm"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="11sp" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tvIntruderCountTag"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/card_telemetry_bg"
+                        android:paddingHorizontal="10dp"
+                        android:paddingVertical="4dp"
+                        android:text="0 ẢNH"
+                        android:textColor="@color/accent_cyan"
+                        android:textSize="10sp"
+                        android:fontFamily="monospace"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
                 <!-- 3. BIOMETRIC VAULT (DANH SÁCH VÂN TAY) -->
                 <LinearLayout
                     android:layout_width="match_parent"

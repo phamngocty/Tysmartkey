@@ -72,3 +72,21 @@
 
 - [x] **Step 1: Biên dịch firmware `platformio run -e esp32-c3` xác nhận 0 lỗi**
 - [x] **Step 2: Kiểm tra dung lượng RAM/Flash sau khi tích hợp LittleFS và ESP32Time**
+
+---
+
+### Task 7: Giao Diện & Logic Xem Lại Trên App Android (Kotlin)
+
+**Files:**
+- Create: `APP Controlesp/app/src/main/res/layout/dialog_intruder_audit.xml`
+- Create: `APP Controlesp/app/src/main/res/layout/item_intruder_log.xml`
+- Modify: `APP Controlesp/app/src/main/res/layout/activity_main.xml`
+- Modify: `APP Controlesp/app/src/main/java/com/example/control_esp/MainActivity.kt`
+
+- [x] **Step 1: Thiết kế Card "Bắt Quả Tang Vân Tay Lạ" trên Tab Vân Tay (`activity_main.xml`)**
+- [x] **Step 2: Thiết kế Dialog xem danh sách các vụ chạm lạ & Preview ảnh vân tay (`dialog_intruder_audit.xml`, `item_intruder_log.xml`)**
+- [x] **Step 3: Bổ sung logic tự động gửi `SYNC_TIME|<epoch>` 1 lần duy nhất khi kết nối BLE**
+- [x] **Step 4: Bổ sung xử lý nhận danh sách (`FB|INTRUDER_ITEM|...`), thông báo chạm lạ thời gian thực (`FB|INTRUDER_CAPTURED|...`) và xóa nhật ký**
+- [x] **Step 5: Tích hợp engine giải mã ảnh `FP_IMG_END`, hiển thị ảnh lên dialog, hỗ trợ nút Đảo màu và Lưu vào thư viện máy**
+- [x] **Step 6: Kiểm tra biên dịch Kotlin bằng Gradle (`:app:compileDebugKotlin` thành công 100%)**
+

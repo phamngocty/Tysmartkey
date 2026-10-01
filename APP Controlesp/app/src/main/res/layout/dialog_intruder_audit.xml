@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/card_cyber_bg"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <!-- Header: Shield Icon & Title -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_marginBottom="12dp">
+
+        <FrameLayout
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/avatar_fp_bg">
+
+            <ImageView
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_gravity="center"
+                android:src="@drawable/ic_shield"
+                app:tint="@color/accent_danger" />
+        </FrameLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="BẮT QUẢ TANG VÂN TAY LẠ"
+                android:textColor="@color/accent_danger"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.04" />
+
+            <TextView
+                android:id="@+id/tvIntruderDialogSubtitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Ảnh lưu trong Flash ESP32 khi xe bị xâm nhập"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <ImageButton
+            android:id="@+id/btnCloseIntruderDialog"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_delete"
+            app:tint="@color/text_secondary" />
+    </LinearLayout>
+
+    <!-- Top Action Bar: Refresh & Clear All -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="12dp">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnRefreshIntruderList"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/header_icon_btn_bg"
+            android:text="🔄 Tải Danh Sách"
+            android:textAllCaps="false"
+            android:textColor="@color/accent_cyan"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnClearIntruderLogs"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/header_icon_btn_bg"
+            android:text="🗑️ Xóa Tất Cả"
+            android:textAllCaps="false"
+            android:textColor="@color/accent_danger"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Loading Bar -->
+    <ProgressBar
+        android:id="@+id/pbIntruderLoading"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        android:indeterminate="true"
+        android:progressTint="@color/accent_danger"
+        android:visibility="gone"
+        android:layout_marginBottom="10dp" />
+
+    <!-- Container Image Preview -->
+    <LinearLayout
+        android:id="@+id/llIntruderImagePreview"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:background="@drawable/bg_terminal_inner"
+        android:padding="12dp"
+        android:visibility="gone"
+        android:layout_marginBottom="12dp">
+
+        <TextView
+            android:id="@+id/tvIntruderImageTimeHeader"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Ảnh vân tay trích xuất lúc: --:--"
+            android:textColor="@color/gold_primary"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <ImageView
+            android:id="@+id/ivIntruderFingerprint"
+            android:layout_width="160dp"
+            android:layout_height="160dp"
+            android:background="#050811"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_fingerprint"
+            android:layout_marginBottom="10dp" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnInvertIntruderImg"
+                android:layout_width="wrap_content"
+                android:layout_height="34dp"
+                android:background="@drawable/header_icon_btn_bg"
+                android:paddingHorizontal="14dp"
+                android:text="🌓 Đảo Màu"
+                android:textAllCaps="false"
+                android:textColor="@color/white"
+                android:textSize="11sp"
+                android:layout_marginEnd="8dp" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btnSaveIntruderImg"
+                android:layout_width="wrap_content"
+                android:layout_height="34dp"
+                android:background="@drawable/btn_gold_hero"
+                android:paddingHorizontal="14dp"
+                android:text="💾 Lưu Vào Máy"
+                android:textAllCaps="false"
+                android:textColor="@color/black"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Empty State -->
+    <TextView
+        android:id="@+id/tvIntruderEmpty"
+        android:layout_width="match_parent"
+        android:layout_height="80dp"
+        android:gravity="center"
+        android:text="🎉 Xe an toàn!\nKhông phát hiện lần chạm vân tay lạ nào."
+        android:textColor="@color/text_secondary"
+        android:textSize="12sp" />
+
+    <!-- RecyclerView Items -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvIntruderList"
+        android:layout_width="match_parent"
+        android:layout_height="220dp"
+        android:visibility="gone" />
+
+</LinearLayout>

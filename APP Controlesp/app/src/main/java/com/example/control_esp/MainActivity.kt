@@ -23,7 +23,14 @@ import android.view.animation.AlphaAnimation
 import android.view.animation.Animation
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Typeface
+import android.content.ContentValues
+import android.provider.MediaStore
+import android.os.Environment
 import android.util.Base64
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
@@ -232,6 +239,28 @@ class MainActivity : AppCompatActivity() {
             onOtaFileSelected(uri)
         }
     }
+
+    // 🛡️ Quản lý Nhật Ký Bắt Quả Tang Vân Tay Lạ (Intruder Audit)
+    data class IntruderLogItem(
+        val index: Int,
+        val filename: String,
+        val timeStr: String,
+        val fileSize: Long
+    )
+    private val intruderLogList = mutableListOf<IntruderLogItem>()
+    private var intruderCount = 0
+    private var tvIntruderBadgeRef: TextView? = null
+    private var tvIntruderCountTagRef: TextView? = null
+    private var intruderAdapter: IntruderLogAdapter? = null
+    private var ivIntruderFingerprintRef: ImageView? = null
+    private var llIntruderImagePreviewRef: View? = null
+    private var tvIntruderImageTimeHeaderRef: TextView? = null
+    private var pbIntruderLoadingRef: ProgressBar? = null
+    private var tvIntruderEmptyRef: TextView? = null
+    private var rvIntruderListRef: androidx.recyclerview.widget.RecyclerView? = null
+    private var currentIntruderBitmap: Bitmap? = null
+    private var isIntruderImageInverted = false
+    private var isFetchingIntruderImage = false
 
     // Quản lý tự động kết nối lại khi xe lại gần
     private var isManualDisconnect = false
@@ -625,6 +654,13 @@ class MainActivity : AppCompatActivity() {
             showUnlockHistoryDialog()
         }
 
+        val btnIntruderAudit = findViewById<View?>(R.id.btnIntruderAudit)
+        tvIntruderBadgeRef = findViewById<TextView?>(R.id.tvIntruderBadge)
+        tvIntruderCountTagRef = findViewById<TextView?>(R.id.tvIntruderCountTag)
+        btnIntruderAudit?.setOnClickListener {
+            showIntruderAuditDialog()
+        }
+
         val btnOtaUpdate = findViewById<Button?>(R.id.btnOtaUpdate)
         btnOtaUpdate?.setOnClickListener {
             showOtaUpdateDialog()
@@ -677,6 +713,9 @@ class MainActivity : AppCompatActivity() {
                     handler.postDelayed(reconnectRunnable, 3500)
                 } else if (connected) {
                     handler.removeCallbacks(reconnectRunnable)
+                    // 🛡️ Đồng bộ thời gian thực (RTC) 1 lần duy nhất khi kết nối BLE để lưu vết vân tay lạ
+                    val epochSec = System.currentTimeMillis() / 1000
+                    sendVehicleCommand("SYNC_TIME|$epochSec")
                 }
             }
         }
@@ -1198,8 +1237,26 @@ class MainActivity : AppCompatActivity() {
                             tvFpTestStatusRef?.text = "📸 Đã chụp ảnh lăng kính thành công lúc $timeStr"
                         }
 
+                        // 4. Nếu đang tải ảnh vân tay kẻ gian vi phạm (Intruder Audit)
+                        if (isFetchingIntruderImage) {
+                            isFetchingIntruderImage = false
+                            currentIntruderBitmap = bmp
+                            isIntruderImageInverted = false
+                            pbIntruderLoadingRef?.visibility = View.GONE
+                            ivIntruderFingerprintRef?.setImageBitmap(bmp)
+                            llIntruderImagePreviewRef?.visibility = View.VISIBLE
+                            val anim = AlphaAnimation(0.2f, 1f).apply { duration = 350 }
+                            llIntruderImagePreviewRef?.startAnimation(anim)
+                            Toast.makeText(this@MainActivity, "✅ Đã tải ảnh vân tay kẻ gian thành công!", Toast.LENGTH_SHORT).show()
+                        }
+
                         triggerHapticFeedback()
                     } else {
+                        if (isFetchingIntruderImage) {
+                            isFetchingIntruderImage = false
+                            pbIntruderLoadingRef?.visibility = View.GONE
+                            Toast.makeText(this@MainActivity, "⚠️ Không thể giải mã ảnh kẻ gian!", Toast.LENGTH_SHORT).show()
+                        }
                         tvTabImageStatusRef?.text = "⚠️ Không thể giải mã ảnh"
                         tvTabImageDescRef?.text = "Dữ liệu ảnh BLE rỗng hoặc không đúng định dạng."
                         tvFpTestStatusRef?.text = "⚠️ Lỗi giải mã ảnh vân tay!"
@@ -1210,8 +1267,76 @@ class MainActivity : AppCompatActivity() {
         }
 
         runOnUiThread {
+            val msg = if (status.startsWith("FB|")) status.substringAfter("FB|") else status
             when {
-                status == "DA_MO_KHOA" -> {
+                // 🛡️ XỬ LÝ NHẬT KÝ BẮT QUẢ TANG VÂN TAY LẠ (INTRUDER AUDIT)
+                msg.startsWith("INTRUDER_COUNT|") -> {
+                    val count = msg.substringAfter("INTRUDER_COUNT|").trim().toIntOrNull() ?: 0
+                    updateIntruderBadgeUI(count)
+                }
+                msg.startsWith("INTRUDER_START") -> {
+                    intruderLogList.clear()
+                    pbIntruderLoadingRef?.visibility = View.VISIBLE
+                    tvIntruderEmptyRef?.visibility = View.GONE
+                    rvIntruderListRef?.visibility = View.VISIBLE
+                }
+                msg.startsWith("INTRUDER_ITEM|") -> {
+                    // INTRUDER_ITEM|<index>|<filename>|<timeStr>|<fileSize>
+                    val parts = msg.split("|")
+                    if (parts.size >= 5) {
+                        val idx = parts[1].toIntOrNull() ?: 0
+                        val fname = parts[2]
+                        val timeStr = parts[3]
+                        val size = parts[4].toLongOrNull() ?: 12800L
+                        if (intruderLogList.none { it.filename == fname }) {
+                            intruderLogList.add(IntruderLogItem(idx, fname, timeStr, size))
+                        }
+                    }
+                }
+                msg.startsWith("INTRUDER_LIST_END") -> {
+                    pbIntruderLoadingRef?.visibility = View.GONE
+                    intruderAdapter?.notifyDataSetChanged()
+                    updateIntruderBadgeUI(intruderLogList.size)
+                    if (intruderLogList.isEmpty()) {
+                        tvIntruderEmptyRef?.visibility = View.VISIBLE
+                        rvIntruderListRef?.visibility = View.GONE
+                    } else {
+                        tvIntruderEmptyRef?.visibility = View.GONE
+                        rvIntruderListRef?.visibility = View.VISIBLE
+                    }
+                }
+                msg.startsWith("INTRUDER_CAPTURED|") -> {
+                    val timeStr = msg.substringAfter("INTRUDER_CAPTURED|").trim()
+                    updateIntruderBadgeUI(intruderCount + 1)
+                    UnlockHistoryManager.addEvent(
+                        this,
+                        "🚨 Bắt quả tang vân tay lạ!",
+                        UnlockHistoryManager.TYPE_ALARM,
+                        "Thời gian: $timeStr (Đã lưu ảnh vào Flash)"
+                    )
+                    Toast.makeText(this, "🚨 Cảnh báo: Bắt quả tang vân tay lạ lúc $timeStr! Đã lưu ảnh vào bộ nhớ.", Toast.LENGTH_LONG).show()
+                    triggerHapticFeedback()
+                }
+                msg == "INTRUDER_CLEARED" -> {
+                    intruderLogList.clear()
+                    intruderAdapter?.notifyDataSetChanged()
+                    updateIntruderBadgeUI(0)
+                    tvIntruderEmptyRef?.visibility = View.VISIBLE
+                    rvIntruderListRef?.visibility = View.GONE
+                    llIntruderImagePreviewRef?.visibility = View.GONE
+                    currentIntruderBitmap = null
+                    Toast.makeText(this, "Đã xóa sạch toàn bộ ảnh vân tay lạ trên xe!", Toast.LENGTH_SHORT).show()
+                }
+                msg == "NO_INTRUDER_LOGS" -> {
+                    pbIntruderLoadingRef?.visibility = View.GONE
+                    intruderLogList.clear()
+                    intruderAdapter?.notifyDataSetChanged()
+                    updateIntruderBadgeUI(0)
+                    tvIntruderEmptyRef?.visibility = View.VISIBLE
+                    rvIntruderListRef?.visibility = View.GONE
+                }
+
+                status == "DA_MO_KHOA" || msg == "DA_MO_KHOA" -> {
                     val wasOff = !isOn
                     isOn = true
                     updatePowerUI(true)
@@ -3948,5 +4073,177 @@ class MainActivity : AppCompatActivity() {
         } else {
             Log.i("APP_LIFECYCLE", "MainActivity onDestroy: Background Service is active, keeping BLE connected.")
         }
+    }
+
+    private fun updateIntruderBadgeUI(count: Int) {
+        runOnUiThread {
+            intruderCount = count
+            tvIntruderCountTagRef?.text = "$count ẢNH"
+            if (count > 0) {
+                tvIntruderCountTagRef?.setTextColor(ContextCompat.getColor(this, R.color.accent_danger))
+                tvIntruderBadgeRef?.text = "⚠️ Phát hiện $count lần chạm lạ!"
+                tvIntruderBadgeRef?.setTextColor(ContextCompat.getColor(this, R.color.accent_danger))
+            } else {
+                tvIntruderCountTagRef?.setTextColor(ContextCompat.getColor(this, R.color.accent_cyan))
+                tvIntruderBadgeRef?.text = "Xe an toàn • Chưa có vi phạm"
+                tvIntruderBadgeRef?.setTextColor(ContextCompat.getColor(this, R.color.text_secondary))
+            }
+        }
+    }
+
+    // ==========================================
+    // 🛡️ HỘP THOẠI BẮT QUẢ TANG VÂN TAY LẠ (INTRUDER AUDIT DIALOG)
+    // ==========================================
+    private fun showIntruderAuditDialog() {
+        if (!isConnectedToVehicle()) {
+            Toast.makeText(this, "Vui lòng kết nối xe trước khi xem nhật ký!", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val dialogView = layoutInflater.inflate(R.layout.dialog_intruder_audit, null)
+        val dialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .create()
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+        val btnClose = dialogView.findViewById<ImageButton>(R.id.btnCloseIntruderDialog)
+        val btnRefresh = dialogView.findViewById<AppCompatButton>(R.id.btnRefreshIntruderList)
+        val btnClear = dialogView.findViewById<AppCompatButton>(R.id.btnClearIntruderLogs)
+        val pbLoading = dialogView.findViewById<ProgressBar>(R.id.pbIntruderLoading)
+        val llPreview = dialogView.findViewById<View>(R.id.llIntruderImagePreview)
+        val ivFp = dialogView.findViewById<ImageView>(R.id.ivIntruderFingerprint)
+        val tvTimeHeader = dialogView.findViewById<TextView>(R.id.tvIntruderImageTimeHeader)
+        val btnInvert = dialogView.findViewById<AppCompatButton>(R.id.btnInvertIntruderImg)
+        val btnSave = dialogView.findViewById<AppCompatButton>(R.id.btnSaveIntruderImg)
+        val tvEmpty = dialogView.findViewById<TextView>(R.id.tvIntruderEmpty)
+        val rvList = dialogView.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.rvIntruderList)
+
+        pbIntruderLoadingRef = pbLoading
+        llIntruderImagePreviewRef = llPreview
+        ivIntruderFingerprintRef = ivFp
+        tvIntruderImageTimeHeaderRef = tvTimeHeader
+        tvIntruderEmptyRef = tvEmpty
+        rvIntruderListRef = rvList
+
+        rvList.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this)
+        intruderAdapter = IntruderLogAdapter(intruderLogList) { item ->
+            isFetchingIntruderImage = true
+            pbLoading.visibility = View.VISIBLE
+            tvTimeHeader.text = "Ảnh trích xuất lúc: ${item.timeStr}"
+            sendVehicleCommand("FETCH_INTRUDER_IMG|${item.filename}")
+            Toast.makeText(this, "Đang tải ảnh ${item.filename} từ xe...", Toast.LENGTH_SHORT).show()
+        }
+        rvList.adapter = intruderAdapter
+
+        if (intruderLogList.isEmpty()) {
+            tvEmpty.visibility = View.VISIBLE
+            rvList.visibility = View.GONE
+        } else {
+            tvEmpty.visibility = View.GONE
+            rvList.visibility = View.VISIBLE
+        }
+
+        btnClose.setOnClickListener { dialog.dismiss() }
+
+        btnRefresh.setOnClickListener {
+            intruderLogList.clear()
+            pbLoading.visibility = View.VISIBLE
+            sendVehicleCommand("GET_INTRUDER_LIST")
+        }
+
+        btnClear.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("🗑️ Xóa Toàn Bộ Nhật Ký")
+                .setMessage("Bạn có chắc chắn muốn xóa tất cả ảnh vân tay kẻ gian đang lưu trong Flash ESP32?")
+                .setPositiveButton("Xóa") { _, _ ->
+                    sendVehicleCommand("CLEAR_INTRUDER_LOGS")
+                }
+                .setNegativeButton("Hủy", null)
+                .show()
+        }
+
+        btnInvert.setOnClickListener {
+            if (currentIntruderBitmap != null) {
+                isIntruderImageInverted = !isIntruderImageInverted
+                val inverted = invertBitmap(currentIntruderBitmap!!)
+                ivFp.setImageBitmap(inverted)
+            }
+        }
+
+        btnSave.setOnClickListener {
+            if (currentIntruderBitmap != null) {
+                saveBitmapToGallery(currentIntruderBitmap!!, "intruder_fp_${System.currentTimeMillis()}.png")
+                Toast.makeText(this, "Đã lưu ảnh vân tay vào Thư viện máy!", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        dialog.show()
+        // Tự động tải danh sách khi vừa mở dialog
+        intruderLogList.clear()
+        pbLoading.visibility = View.VISIBLE
+        sendVehicleCommand("GET_INTRUDER_LIST")
+    }
+
+    private fun invertBitmap(src: Bitmap): Bitmap {
+        val out = Bitmap.createBitmap(src.width, src.height, src.config ?: Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        val paint = Paint()
+        val matrix = ColorMatrix(floatArrayOf(
+            -1f, 0f, 0f, 0f, 255f,
+            0f, -1f, 0f, 0f, 255f,
+            0f, 0f, -1f, 0f, 255f,
+            0f, 0f, 0f, 1f, 0f
+        ))
+        paint.colorFilter = ColorMatrixColorFilter(matrix)
+        canvas.drawBitmap(src, 0f, 0f, paint)
+        return out
+    }
+
+    private fun saveBitmapToGallery(bmp: Bitmap, filename: String) {
+        try {
+            val resolver = contentResolver
+            val contentValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/TySmartKey")
+                }
+            }
+            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+            if (uri != null) {
+                resolver.openOutputStream(uri)?.use { stream ->
+                    bmp.compress(Bitmap.CompressFormat.PNG, 100, stream)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("SAVE_IMG", "Lỗi lưu ảnh", e)
+        }
+    }
+
+    class IntruderLogAdapter(
+        private val items: List<IntruderLogItem>,
+        private val onItemClick: (IntruderLogItem) -> Unit
+    ) : androidx.recyclerview.widget.RecyclerView.Adapter<IntruderLogAdapter.ViewHolder>() {
+
+        class ViewHolder(view: View) : androidx.recyclerview.widget.RecyclerView.ViewHolder(view) {
+            val tvTime: TextView = view.findViewById(R.id.tvIntruderTime)
+            val tvDetails: TextView = view.findViewById(R.id.tvIntruderDetails)
+            val btnFetch: AppCompatButton = view.findViewById(R.id.btnFetchIntruderItem)
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+            val view = LayoutInflater.from(parent.context).inflate(R.layout.item_intruder_log, parent, false)
+            return ViewHolder(view)
+        }
+
+        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+            val item = items[position]
+            holder.tvTime.text = item.timeStr
+            val kb = String.format("%.1f KB", item.fileSize / 1024.0)
+            holder.tvDetails.text = "${item.filename} • $kb"
+            holder.btnFetch.setOnClickListener { onItemClick(item) }
+        }
+
+        override fun getItemCount() = items.size
     }
 }
