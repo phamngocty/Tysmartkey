@@ -2,20 +2,26 @@
   "app": {
     "versionCode": 7,
     "versionName": "1.0.7",
-    "apkUrl": "",
+    "apkUrl": "https://github.com/phamngocty/Tysmartkey/releases/download/v1.0.7/app-debug.apk",
+    "apkName": "app-debug.apk",
     "changelog": "• Cập nhật tính năng mới và cải thiện độ ổn định"
   },
   "firmware": {
     "versionCode": 7,
     "versionName": "1.0.7",
-    "binUrl": "",
-    "oledBinUrl": "",
+    "binUrl": "https://github.com/phamngocty/Tysmartkey/releases/download/v1.0.7/firmware.bin",
+    "binName": "firmware.bin",
+    "secondaryBinUrl": "",
+    "secondaryBinName": "",
+    "oledBinUrl": "https://github.com/phamngocty/Tysmartkey/releases/download/v1.0.7/firmware.bin",
     "changelog": "• Cập nhật tính năng mới và cải thiện độ ổn định"
   },
   "firmware_oled": {
     "versionCode": 7,
     "versionName": "1.0.7",
-    "binUrl": "",
+    "binUrl": "https://github.com/phamngocty/Tysmartkey/releases/download/v1.0.7/firmware.bin",
+    "binName": "firmware_oled.bin",
     "changelog": "• Cập nhật tính năng mới và cải thiện độ ổn định"
-  }
+  },
+  "assets": []
 }
