@@ -18,6 +18,9 @@
 ESP32Time rtc(0);                   // RTC nội ESP32 (offset 0, đồng bộ timestamp từ App Android)
 bool hasSyncedTime = false;         // Cờ đã đồng bộ giờ thực từ App Android hay chưa
 const int MAX_INTRUDER_PHOTOS = 10; // Giới hạn lưu tối đa 10 ảnh vân tay kẻ gian (FIFO)
+bool intruderCaptureEnabled = true; // Bật/Tắt tính năng tự động trích xuất & lưu ảnh kẻ gian vào LittleFS
+int crankTimeMs = 1500;             // Thời gian giữ đề xe (ms), dải từ 200ms đến 5000ms
+
 // 🚀 QUẢN LÝ PHIÊN BẢN & CẬP NHẬT OTA TỪ XA
 // ==========================================
 const int CURRENT_FW_VERSION = 3;
@@ -836,8 +839,10 @@ void triggerStarter()
         beep(3, 60);
         return;
     }
+    int holdMs = constrain(crankTimeMs, 200, 5000);
+    Serial.printf("⚡ [STARTER] Kích hoạt Relay 2 đề nổ trong %d ms...\n", holdMs);
     digitalWrite(RELAY2_PIN, LOW); // Active LOW: Kích hoạt đề nổ máy
-    delay(1500);
+    delay(holdMs);
     digitalWrite(RELAY2_PIN, HIGH); // Tắt đề
     notifyStatus("DA_DE_MAY");
 }
@@ -1460,7 +1465,10 @@ void cleanupOldIntruderFilesFIFO(int maxKeep = MAX_INTRUDER_PHOTOS)
 {
     File root = LittleFS.open("/intruder");
     if (!root || !root.isDirectory())
+    {
+        if (root) root.close();
         return;
+    }
 
     File file = root.openNextFile();
     int count = 0;
@@ -1486,8 +1494,10 @@ void cleanupOldIntruderFilesFIFO(int maxKeep = MAX_INTRUDER_PHOTOS)
                 }
             }
         }
+        file.close();
         file = root.openNextFile();
     }
+    root.close();
 
     if (count >= maxKeep && oldestFile.length() > 0)
     {
@@ -1502,15 +1512,20 @@ int getIntruderLogCount()
 {
     File root = LittleFS.open("/intruder");
     if (!root || !root.isDirectory())
+    {
+        if (root) root.close();
         return 0;
+    }
     int count = 0;
     File file = root.openNextFile();
     while (file)
     {
         if (!file.isDirectory())
             count++;
+        file.close();
         file = root.openNextFile();
     }
+    root.close();
     return count;
 }
 
@@ -1540,9 +1555,14 @@ bool captureAndSaveIntruderFingerprint()
     }
 
     uint8_t ackRest[6];
-    if (!readUartBytes(ackRest, 6, 1500) || ackRest[3] != 0x00)
+    if (!readUartBytes(ackRest, 6, 1500))
     {
-        Serial.println("❌ Cảm biến từ chối truyền ảnh xâm nhập!");
+        Serial.println("❌ Lỗi đọc nội dung phản hồi UpImage từ cảm biến!");
+        return false;
+    }
+    if (ackRest[3] != 0x00)
+    {
+        Serial.printf("❌ Cảm biến từ chối truyền ảnh xâm nhập! Mã phản hồi: 0x%02X (%s)\n", ackRest[3], r503GetStatusString(ackRest[3]));
         return false;
     }
 
@@ -1604,6 +1624,7 @@ void sendIntruderListOverBle()
     File root = LittleFS.open("/intruder");
     if (!root || !root.isDirectory())
     {
+        if (root) root.close();
         notifyStatus("FB|INTRUDER_LIST_END|0");
         return;
     }
@@ -1615,6 +1636,7 @@ void sendIntruderListOverBle()
         if (!file.isDirectory())
         {
             String fname = file.name();
+            size_t fsize = file.size();
             int idx1 = fname.indexOf("fp_");
             int idx2 = fname.indexOf(".raw");
             String timeStr = fname;
@@ -1634,12 +1656,14 @@ void sendIntruderListOverBle()
                     timeStr = "Uptime: " + String(ts) + "s";
                 }
             }
-            notifyStatus("FB|INTRUDER_ITEM|" + String(idx) + "|" + fname + "|" + timeStr + "|" + String(file.size()));
+            notifyStatus("FB|INTRUDER_ITEM|" + String(idx) + "|" + fname + "|" + timeStr + "|" + String(fsize));
             idx++;
             vTaskDelay(pdMS_TO_TICKS(40));
         }
+        file.close();
         file = root.openNextFile();
     }
+    root.close();
     notifyStatus("FB|INTRUDER_LIST_END|" + String(idx));
 }
 
@@ -1705,22 +1729,40 @@ void clearAllIntruderLogs()
 {
     File root = LittleFS.open("/intruder");
     if (!root || !root.isDirectory())
+    {
+        if (root) root.close();
+        notifyStatus("FB|INTRUDER_CLEARED|0");
         return;
+    }
 
+    std::vector<String> filesToDelete;
     File file = root.openNextFile();
-    int count = 0;
     while (file)
     {
         if (!file.isDirectory())
         {
             String fname = file.name();
             String p = fname.startsWith("/") ? fname : ("/intruder/" + fname);
-            LittleFS.remove(p);
-            count++;
+            filesToDelete.push_back(p);
         }
+        file.close();
         file = root.openNextFile();
     }
-    Serial.printf("🧹 Đã xóa toàn bộ %d ảnh vân tay kẻ gian trong Flash!\n", count);
+    root.close();
+
+    int count = 0;
+    for (const auto &p : filesToDelete)
+    {
+        if (LittleFS.remove(p))
+        {
+            count++;
+        }
+        else
+        {
+            Serial.printf("⚠️ Không thể xóa file: %s\n", p.c_str());
+        }
+    }
+    Serial.printf("🧹 Đã xóa toàn bộ %d/%d ảnh vân tay kẻ gian trong Flash!\n", count, (int)filesToDelete.size());
     notifyStatus("FB|INTRUDER_CLEARED|" + String(count));
 }
 
@@ -2704,22 +2746,30 @@ void handleFingerprintTouch()
     }
     else
     {
+        // 1. Chặn sớm nếu không có ngón tay thực sự (nhiễu điện / nước mưa chạm lướt)
+        if (!fingerDetected)
+        {
+            return;
+        }
+
         // VÂN TAY KHÔNG KHỚP HOẶC KHÔNG HỢP LỆ
         if (matched && !isRegistered)
         {
             Serial.printf("ℹ️ Vân tay ID %d có trong R503 nhưng chưa đăng ký trong Flash NVS\n", id);
         }
 
+        // 2. 🛡️ BẮT QUẢ TANG: KHI XE ĐANG KHÓA MÀ CÓ VÂN TAY LẠ -> LẬP TỨC TRÍCH XUẤT ẢNH TỪ R503 LƯU FLASH TRƯỚC!
+        // (Lưu ý kỹ thuật: Phải gọi UpImage 0x0A ngay khi ảnh trong ImageBuffer còn nguyên, TRƯỚC khi gọi ledError chớp đèn)
+        if (!isUnlocked && intruderCaptureEnabled)
+        {
+            Serial.println("🛡️ [BẮT QUẢ TANG] Phát hiện vân tay lạ khi xe đang khóa -> Lập tức trích xuất ảnh lưu Flash...");
+            captureAndSaveIntruderFingerprint();
+        }
+
         wrongFingerAttempts++;
         Serial.printf("❌ Vân tay không hợp lệ! (Lần %d, Confidence: %d)\n", wrongFingerAttempts, matchedConfidence);
         ledError();
         notifyStatus("FP_NOT_MATCH");
-
-        // 🛡️ BẮT QUẢ TANG: KHI XE ĐANG KHÓA MÀ CÓ VÂN TAY LẠ -> LẬP TỨC TRÍCH XUẤT ẢNH TỪ R503 LƯU FLASH!
-        if (!isUnlocked && fingerDetected)
-        {
-            captureAndSaveIntruderFingerprint();
-        }
 
         int threshold = rainEnabled ? maxWrongAttempts : 3;
         if (threshold > 0 && wrongFingerAttempts >= threshold)
@@ -2997,6 +3047,29 @@ void processIncomingCommand(String data)
     else if (cmd == "CLEAR_INTRUDER_LOGS")
     {
         clearAllIntruderLogs();
+    }
+    else if (cmd == "GET_INTRUDER_CFG")
+    {
+        notifyStatus("FB|INTRUDER_CFG|" + String(intruderCaptureEnabled ? 1 : 0));
+    }
+    else if (cmd == "SET_INTRUDER_CFG" && params.length() > 0)
+    {
+        intruderCaptureEnabled = (params.toInt() == 1);
+        prefsFinger.putBool("intruder_en", intruderCaptureEnabled);
+        Serial.printf("🛡️ [CONFIG] Cài đặt Bắt Quả Tang Vân Tay Lạ: %s\n", intruderCaptureEnabled ? "BẬT" : "TẮT");
+        notifyStatus("FB|INTRUDER_CFG|" + String(intruderCaptureEnabled ? 1 : 0));
+    }
+    else if (cmd == "GET_CRANK_TIME")
+    {
+        notifyStatus("FB|CRANK_TIME|" + String(crankTimeMs));
+    }
+    else if (cmd == "SET_CRANK_TIME" && params.length() > 0)
+    {
+        int t = params.toInt();
+        crankTimeMs = constrain(t, 200, 5000);
+        prefsSecurity.putInt("crank_ms", crankTimeMs);
+        Serial.printf("⚡ [CONFIG] Cài đặt thời gian đề xe: %d ms\n", crankTimeMs);
+        notifyStatus("FB|CRANK_TIME|" + String(crankTimeMs));
     }
     // --- CÁC LỆNH TINH CHỈNH CẢM BIẾN VÂN TAY ---
     else if (cmd == "GET_FP_CFG")
@@ -3546,6 +3619,10 @@ class ServerCallbacks : public NimBLEServerCallbacks
         notifyStatus("VEHICLE_NAME|" + vehicleName);
         delay(40);
         notifyStatus("FB|INTRUDER_COUNT|" + String(getIntruderLogCount()));
+        delay(40);
+        notifyStatus("FB|INTRUDER_CFG|" + String(intruderCaptureEnabled ? 1 : 0));
+        delay(40);
+        notifyStatus("FB|CRANK_TIME|" + String(crankTimeMs));
     }
 
     uint32_t onPassKeyRequest() override
@@ -3771,8 +3848,13 @@ void setup()
     fpScanWindowMs = prefsFinger.getInt("scan_win", 1200);
     fpEnrollMode = prefsFinger.getInt("enroll_mode", 4);
     fpSendEnrollImage = prefsFinger.getBool("send_img", false);
-    Serial.printf("🔍 FP Config: SecLevel=%d | ScanWin=%dms | EnrollMode=%d | SendImg=%d\n",
-                  fpSecurityLevel, fpScanWindowMs, fpEnrollMode, fpSendEnrollImage ? 1 : 0);
+    intruderCaptureEnabled = prefsFinger.getBool("intruder_en", true);
+    Serial.printf("🔍 FP Config: SecLevel=%d | ScanWin=%dms | EnrollMode=%d | SendImg=%d | IntruderCapture=%s\n",
+                  fpSecurityLevel, fpScanWindowMs, fpEnrollMode, fpSendEnrollImage ? 1 : 0, intruderCaptureEnabled ? "BẬT" : "TẮT");
+
+    // Tải thời gian đề xe
+    crankTimeMs = prefsSecurity.getInt("crank_ms", 1500);
+    Serial.printf("⚡ Thời gian đề nổ (Crank Time): %d ms\n", crankTimeMs);
 
     // KHÔI PHỤC NGAY LẬP TỨC TRẠNG THÁI RELAY KHI KHỞI ĐỘNG (FAIL-SAFE)
     digitalWrite(RELAY1_PIN, isUnlocked ? HIGH : LOW);

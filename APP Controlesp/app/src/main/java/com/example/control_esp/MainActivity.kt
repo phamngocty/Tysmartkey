@@ -261,6 +261,9 @@ class MainActivity : AppCompatActivity() {
     private var currentIntruderBitmap: Bitmap? = null
     private var isIntruderImageInverted = false
     private var isFetchingIntruderImage = false
+    private var intruderCaptureEnabled = true
+    private var swIntruderEnableRef: androidx.appcompat.widget.SwitchCompat? = null
+    private var crankTimeMs = 1500
 
     // Quản lý tự động kết nối lại khi xe lại gần
     private var isManualDisconnect = false
@@ -843,6 +846,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        val btnConfigCrankTime = findViewById<View?>(R.id.btnConfigCrankTime)
+        btnConfigCrankTime?.setOnClickListener {
+            showCrankTimeSettingsDialog()
+        }
+
         btnStartHero?.setOnClickListener {
             if (!isConnectedToVehicle()) {
                 triggerHapticFeedback()
@@ -853,6 +861,11 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
             handleEngineStart()
+        }
+
+        btnStartHero?.setOnLongClickListener {
+            showCrankTimeSettingsDialog()
+            true
         }
 
         btnFindHero?.setOnClickListener {
@@ -965,17 +978,17 @@ class MainActivity : AppCompatActivity() {
         sendVehicleCommand("2")
         triggerHapticFeedback()
 
-        // Hoạt ảnh đề xe 1.5s (cranking vibration)
-        tvEngineBadge?.text = "1.5s Đang đề..."
+        val secStr = String.format(java.util.Locale.US, "%.1fs", crankTimeMs / 1000f)
+        tvEngineBadge?.text = "$secStr Đang đề..."
         tvEngineBadge?.setTextColor(getColor(R.color.accent_amber))
-        tvEngineDesc?.text = "Đang quay củ đề..."
+        tvEngineDesc?.text = "Đang quay củ đề ($crankTimeMs ms)..."
         ivEngineIcon?.setColorFilter(getColor(R.color.accent_amber))
 
         ivBikeSilhouette?.let { bike ->
             val shakeAnim = android.view.animation.TranslateAnimation(-4f, 4f, 0f, 0f).apply {
                 duration = 50
                 repeatMode = Animation.REVERSE
-                repeatCount = 30 // 1.5s
+                repeatCount = (crankTimeMs / 50).coerceIn(4, 100)
             }
             bike.startAnimation(shakeAnim)
         }
@@ -987,7 +1000,7 @@ class MainActivity : AppCompatActivity() {
             tvEngineDesc?.text = "Động cơ đang nổ"
             ivEngineIcon?.setColorFilter(getColor(R.color.secondary_teal))
             ivBikeSilhouette?.clearAnimation()
-        }, 1500)
+        }, crankTimeMs.toLong())
     }
 
     private fun animateHazardBlink(durationMs: Long = 1200L) {
@@ -1317,7 +1330,7 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this, "🚨 Cảnh báo: Bắt quả tang vân tay lạ lúc $timeStr! Đã lưu ảnh vào bộ nhớ.", Toast.LENGTH_LONG).show()
                     triggerHapticFeedback()
                 }
-                msg == "INTRUDER_CLEARED" -> {
+                msg.startsWith("INTRUDER_CLEARED") -> {
                     intruderLogList.clear()
                     intruderAdapter?.notifyDataSetChanged()
                     updateIntruderBadgeUI(0)
@@ -1326,6 +1339,17 @@ class MainActivity : AppCompatActivity() {
                     llIntruderImagePreviewRef?.visibility = View.GONE
                     currentIntruderBitmap = null
                     Toast.makeText(this, "Đã xóa sạch toàn bộ ảnh vân tay lạ trên xe!", Toast.LENGTH_SHORT).show()
+                }
+                msg.startsWith("INTRUDER_CFG|") -> {
+                    val en = msg.substringAfter("INTRUDER_CFG|").trim() == "1"
+                    intruderCaptureEnabled = en
+                    swIntruderEnableRef?.isChecked = en
+                    getSharedPreferences("BT_PREF", MODE_PRIVATE).edit().putBoolean("INTRUDER_CAPTURE_EN", en).apply()
+                }
+                msg.startsWith("CRANK_TIME|") -> {
+                    val t = msg.substringAfter("CRANK_TIME|").trim().toIntOrNull() ?: 1500
+                    crankTimeMs = t.coerceIn(200, 5000)
+                    getSharedPreferences("BT_PREF", MODE_PRIVATE).edit().putInt("CRANK_TIME_MS", crankTimeMs).apply()
                 }
                 msg == "NO_INTRUDER_LOGS" -> {
                     pbIntruderLoadingRef?.visibility = View.GONE
@@ -4177,11 +4201,117 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        val swEnable = dialogView.findViewById<androidx.appcompat.widget.SwitchCompat>(R.id.swIntruderEnable)
+        val tvSwitchSubtitle = dialogView.findViewById<TextView>(R.id.tvIntruderSwitchSubtitle)
+        swIntruderEnableRef = swEnable
+
+        swEnable?.isChecked = intruderCaptureEnabled
+        tvSwitchSubtitle?.text = if (intruderCaptureEnabled) "🟢 Đang BẬT: Tự động lưu ảnh khi có vân tay lạ" else "⚪ Đang TẮT: Không lưu ảnh vân tay lạ"
+
+        swEnable?.setOnCheckedChangeListener { _, isChecked ->
+            intruderCaptureEnabled = isChecked
+            tvSwitchSubtitle?.text = if (isChecked) "🟢 Đang BẬT: Tự động lưu ảnh khi có vân tay lạ" else "⚪ Đang TẮT: Không lưu ảnh vân tay lạ"
+            getSharedPreferences("BT_PREF", MODE_PRIVATE).edit().putBoolean("INTRUDER_CAPTURE_EN", isChecked).apply()
+            sendVehicleCommand("SET_INTRUDER_CFG|${if (isChecked) 1 else 0}")
+            Toast.makeText(this, if (isChecked) "Đã BẬT tự động bắt quả tang vân tay lạ" else "Đã TẮT bắt quả tang vân tay lạ", Toast.LENGTH_SHORT).show()
+        }
+
         dialog.show()
-        // Tự động tải danh sách khi vừa mở dialog
+        // Tự động tải danh sách và đồng bộ cấu hình khi vừa mở dialog
+        sendVehicleCommand("GET_INTRUDER_CFG")
         intruderLogList.clear()
         pbLoading.visibility = View.VISIBLE
         sendVehicleCommand("GET_INTRUDER_LIST")
+    }
+
+    // ==========================================
+    // ⚡ HỘP THOẠI CÀI ĐẶT THỜI GIAN ĐỀ XE (CRANK TIME SETTINGS)
+    // ==========================================
+    private fun showCrankTimeSettingsDialog() {
+        if (!isConnectedToVehicle()) {
+            Toast.makeText(this, "Vui lòng kết nối xe trước khi cài đặt!", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val dialogView = layoutInflater.inflate(R.layout.dialog_crank_time_settings, null)
+        val dialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .create()
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+        val btnClose = dialogView.findViewById<ImageButton>(R.id.btnCloseCrankDialog)
+        val tvCurrent = dialogView.findViewById<TextView>(R.id.tvCurrentCrankMs)
+        val tvHint = dialogView.findViewById<TextView>(R.id.tvCrankVehicleHint)
+        val etMs = dialogView.findViewById<EditText>(R.id.etCrankTimeMs)
+        val sb = dialogView.findViewById<SeekBar>(R.id.sbCrankTime)
+        val btnScooter = dialogView.findViewById<androidx.appcompat.widget.AppCompatButton>(R.id.btnPresetScooter)
+        val btnStandard = dialogView.findViewById<androidx.appcompat.widget.AppCompatButton>(R.id.btnPresetStandard)
+        val btnHeavy = dialogView.findViewById<androidx.appcompat.widget.AppCompatButton>(R.id.btnPresetHeavy)
+        val btnSave = dialogView.findViewById<androidx.appcompat.widget.AppCompatButton>(R.id.btnSaveCrankTime)
+
+        var selectedMs = crankTimeMs.coerceIn(300, 5000)
+
+        fun updateUI(ms: Int) {
+            selectedMs = ms.coerceIn(300, 5000)
+            val sec = selectedMs / 1000f
+            tvCurrent?.text = "$selectedMs ms (${String.format(java.util.Locale.US, "%.1fs", sec)})"
+            if (etMs?.text?.toString() != selectedMs.toString()) {
+                etMs?.setText(selectedMs.toString())
+                etMs?.setSelection(etMs.text.length)
+            }
+            val progress = ((selectedMs - 300) / 100).coerceIn(0, 47)
+            if (sb?.progress != progress) {
+                sb?.progress = progress
+            }
+            tvHint?.text = when {
+                selectedMs < 1000 -> "⚡ Đề cực nhạy: Phù hợp xe tay ga FI đời mới, dễ nổ"
+                selectedMs <= 1800 -> "✨ Tiêu chuẩn: Chuẩn cho hầu hết các dòng xe số & tay ga phổ thông"
+                else -> "🚀 Kéo dài: Dành cho xe bình yếu, xe phân khối lớn hoặc xe khó nổ"
+            }
+        }
+
+        updateUI(selectedMs)
+
+        sb?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(p0: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    val ms = 300 + progress * 100
+                    updateUI(ms)
+                }
+            }
+            override fun onStartTrackingTouch(p0: SeekBar?) {}
+            override fun onStopTrackingTouch(p0: SeekBar?) {}
+        })
+
+        etMs?.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                val inputMs = s?.toString()?.toIntOrNull()
+                if (inputMs != null && inputMs in 200..5000 && inputMs != selectedMs) {
+                    updateUI(inputMs)
+                }
+            }
+        })
+
+        btnScooter?.setOnClickListener { updateUI(800) }
+        btnStandard?.setOnClickListener { updateUI(1500) }
+        btnHeavy?.setOnClickListener { updateUI(2500) }
+
+        btnSave?.setOnClickListener {
+            val finalMs = etMs?.text?.toString()?.toIntOrNull() ?: selectedMs
+            val clamped = finalMs.coerceIn(200, 5000)
+            crankTimeMs = clamped
+            getSharedPreferences("BT_PREF", MODE_PRIVATE).edit().putInt("CRANK_TIME_MS", clamped).apply()
+            sendVehicleCommand("SET_CRANK_TIME|$clamped")
+            Toast.makeText(this, "✅ Đã lưu thời gian đề xe: $clamped ms (${String.format(java.util.Locale.US, "%.1fs", clamped / 1000f)})", Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
+        }
+
+        btnClose?.setOnClickListener { dialog.dismiss() }
+
+        dialog.show()
+        sendVehicleCommand("GET_CRANK_TIME")
     }
 
     private fun invertBitmap(src: Bitmap): Bitmap {

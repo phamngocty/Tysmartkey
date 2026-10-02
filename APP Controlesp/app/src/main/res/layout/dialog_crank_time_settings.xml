@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/card_cyber_bg"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <!-- Header: Icon & Title -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_marginBottom="16dp">
+
+        <FrameLayout
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/avatar_fp_bg">
+
+            <ImageView
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_gravity="center"
+                android:src="@drawable/ic_engine"
+                app:tint="@color/accent_amber" />
+        </FrameLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="CÀI ĐẶT THỜI GIAN ĐỀ XE"
+                android:textColor="@color/accent_amber"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.04" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Điều chỉnh thời gian giữ Relay đề cho từng loại xe"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <ImageButton
+            android:id="@+id/btnCloseCrankDialog"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_delete"
+            app:tint="@color/text_secondary" />
+    </LinearLayout>
+
+    <!-- Display Value Card -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/card_telemetry_bg"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="16dp"
+        android:layout_marginBottom="16dp">
+
+        <TextView
+            android:id="@+id/tvCurrentCrankMs"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:text="1500 ms (1.5s)"
+            android:textColor="@color/accent_cyan"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvCrankVehicleHint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Khuyên dùng: Chuẩn cho hầu hết các dòng xe máy phổ thông"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <!-- Direct Input EditText -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="14dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Nhập chính xác (ms):"
+            android:textColor="@color/white"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/etCrankTimeMs"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="10dp"
+            android:layout_weight="1"
+            android:background="@drawable/header_icon_btn_bg"
+            android:gravity="center"
+            android:inputType="number"
+            android:maxLength="4"
+            android:text="1500"
+            android:textColor="@color/white"
+            android:textSize="14sp"
+            android:fontFamily="monospace"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="ms"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <!-- Slider SeekBar -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Hoặc kéo thanh trượt (300ms - 5000ms):"
+        android:textColor="@color/text_secondary"
+        android:textSize="11sp"
+        android:layout_marginBottom="6dp" />
+
+    <SeekBar
+        android:id="@+id/sbCrankTime"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="47"
+        android:progress="12"
+        android:progressTint="@color/accent_amber"
+        android:thumbTint="@color/accent_amber"
+        android:layout_marginBottom="16dp" />
+
+    <!-- Preset Buttons: Nút chọn nhanh cho từng loại xe -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Chọn nhanh theo cấu hình xe:"
+        android:textColor="@color/text_secondary"
+        android:textSize="11sp"
+        android:layout_marginBottom="8dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="16dp">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnPresetScooter"
+            android:layout_width="0dp"
+            android:layout_height="34dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/header_icon_btn_bg"
+            android:text="Xe Ga (0.8s)"
+            android:textAllCaps="false"
+            android:textColor="@color/white"
+            android:textSize="10.5sp" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnPresetStandard"
+            android:layout_width="0dp"
+            android:layout_height="34dp"
+            android:layout_weight="1"
+            android:layout_marginHorizontal="4dp"
+            android:background="@drawable/header_icon_btn_bg"
+            android:text="Chuẩn (1.5s)"
+            android:textAllCaps="false"
+            android:textColor="@color/accent_cyan"
+            android:textSize="10.5sp" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnPresetHeavy"
+            android:layout_width="0dp"
+            android:layout_height="34dp"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:background="@drawable/header_icon_btn_bg"
+            android:text="Xe Cũ/PKL (2.5s)"
+            android:textAllCaps="false"
+            android:textColor="@color/accent_amber"
+            android:textSize="10.5sp" />
+    </LinearLayout>
+
+    <!-- Save Button -->
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/btnSaveCrankTime"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:background="@drawable/button_background"
+        android:text="💾 LƯU CẤU HÌNH THỜI GIAN ĐỀ"
+        android:textAllCaps="false"
+        android:textColor="@color/white"
+        android:textSize="13sp"
+        android:textStyle="bold" />
+
+</LinearLayout>

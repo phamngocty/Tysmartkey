@@ -62,6 +62,47 @@
             app:tint="@color/text_secondary" />
     </LinearLayout>
 
+    <!-- TOGGLE SWITCH: BẬT / TẮT TÍNH NĂNG BẮT QUẢ TANG VÂN TAY LẠ -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/header_icon_btn_bg"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="12dp"
+        android:layout_marginBottom="12dp">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Tự Động Bắt Quả Tang"
+                android:textColor="@color/white"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvIntruderSwitchSubtitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="Chụp &amp; lưu Flash khi phát hiện ngón tay lạ lúc xe khóa"
+                android:textColor="@color/text_secondary"
+                android:textSize="10.5sp" />
+        </LinearLayout>
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/swIntruderEnable"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true" />
+    </LinearLayout>
+
     <!-- Top Action Bar: Refresh & Clear All -->
     <LinearLayout
         android:layout_width="match_parent"
