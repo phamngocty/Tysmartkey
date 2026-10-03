@@ -13,8 +13,32 @@ class WearMessageListenerService : WearableListenerService() {
         
         when (messageEvent.path) {
             "/ping" -> {
-                Log.d("WEAR_BRIDGE", "Ping received from watch! Syncing current state...")
+                Log.d("WEAR_BRIDGE", "Ping received from watch! Syncing current state and wear settings...")
                 WatchSyncHelper.syncCurrentStateToWatch(this)
+                WatchSyncHelper.syncWearSettingsToWatch(this)
+            }
+            "/settings_watch" -> {
+                try {
+                    val payload = String(messageEvent.data, Charsets.UTF_8)
+                    Log.d("WEAR_BRIDGE", "Settings received from watch: $payload")
+                    val parts = payload.split("|")
+                    if (parts.size >= 3) {
+                        val enabled = parts[0].toBoolean()
+                        val mode = parts[1].toIntOrNull() ?: 0
+                        val sens = parts[2].toIntOrNull() ?: 1
+
+                        val prefs = getSharedPreferences("BT_PREF", Context.MODE_PRIVATE)
+                        prefs.edit()
+                            .putBoolean("WEAR_GESTURE_ENABLED", enabled)
+                            .putInt("WEAR_GESTURE_MODE", mode)
+                            .putInt("WEAR_GESTURE_SENSITIVITY", sens)
+                            .apply()
+
+                        WatchSyncHelper.onWearSettingsChangedFromWatch?.invoke(enabled, mode, sens)
+                    }
+                } catch (e: Exception) {
+                    Log.e("WEAR_BRIDGE", "Error parsing /settings_watch", e)
+                }
             }
             "/command" -> {
                 val command = String(messageEvent.data)

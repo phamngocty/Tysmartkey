@@ -1746,6 +1746,18 @@
                         </LinearLayout>
 
                         <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btnWatchGestureSettings"
+                            android:layout_width="wrap_content"
+                            android:layout_height="34dp"
+                            android:background="@drawable/header_icon_btn_bg"
+                            android:text="Cử chỉ"
+                            android:textAllCaps="false"
+                            android:textColor="@color/gold_primary"
+                            android:textSize="12sp"
+                            android:layout_marginEnd="6dp"
+                            android:paddingHorizontal="10dp" />
+
+                        <androidx.appcompat.widget.AppCompatButton
                             android:id="@+id/btnSyncWatchNow"
                             android:layout_width="wrap_content"
                             android:layout_height="34dp"

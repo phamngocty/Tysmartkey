@@ -52,6 +52,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
     private var sensorManager: SensorManager? = null
     private var accelSensor: Sensor? = null
     private var lastGestureTime = 0L
+    private var appResumeTime = 0L
 
     // State quan sát thời gian thực trên Jetpack Compose
     private var isEspConnected by mutableStateOf(false)
@@ -59,6 +60,8 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
     private var isEngineStarting by mutableStateOf(false)
     private var isAutoStartEnabled by mutableStateOf(false)
     private var isGestureEnabled by mutableStateOf(true) // Cho phép búng tay đề máy
+    private var gestureActionMode by mutableStateOf(0) // 0: MODE_START_ONLY (An toàn), 1: MODE_TOGGLE_AND_START
+    private var gestureSensitivity by mutableStateOf(1) // 0: Thấp (26m/s²), 1: Vừa (21m/s²), 2: Cao (16m/s²)
     private var statusText by mutableStateOf("ĐANG KHỞI TẠO")
     private var vehicleDistance by mutableStateOf(-1f)
     private var vehicleRssi by mutableStateOf(0)
@@ -69,6 +72,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
     private var lastY = 0f
     private var lastZ = 0f
     private var isFirstSample = true
+    private var isSensorRegistered = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -77,6 +81,8 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
         val prefs = getSharedPreferences("WEAR_PREF", Context.MODE_PRIVATE)
         isAutoStartEnabled = prefs.getBoolean("AUTO_START", false)
         isGestureEnabled = prefs.getBoolean("GESTURE_START", true)
+        gestureActionMode = prefs.getInt("GESTURE_ACTION_MODE", 0) // Mặc định 0: Chỉ đề khi xe bật
+        gestureSensitivity = prefs.getInt("GESTURE_SENSITIVITY", 1) // Mặc định 1: Vừa
 
         // 2. Khởi tạo SensorManager an toàn ngay trong onCreate (trước khi Compose hiển thị)
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
@@ -161,6 +167,8 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                             isEspConnected = isEspConnected,
                             isAutoStartEnabled = isAutoStartEnabled,
                             isGestureEnabled = isGestureEnabled,
+                            gestureMode = gestureActionMode,
+                            gestureSensitivity = gestureSensitivity,
                             onAutoStartToggle = {
                                 isAutoStartEnabled = it
                                 getSharedPreferences("WEAR_PREF", Context.MODE_PRIVATE).edit()
@@ -170,7 +178,20 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                                 isGestureEnabled = it
                                 getSharedPreferences("WEAR_PREF", Context.MODE_PRIVATE).edit()
                                     .putBoolean("GESTURE_START", it).apply()
-                                registerSensorIfNeeded()
+                                registerSensorIfNeeded(force = true)
+                                sendSettingsToPhone()
+                            },
+                            onGestureModeCycle = {
+                                gestureActionMode = if (gestureActionMode == 0) 1 else 0
+                                getSharedPreferences("WEAR_PREF", Context.MODE_PRIVATE).edit()
+                                    .putInt("GESTURE_ACTION_MODE", gestureActionMode).apply()
+                                sendSettingsToPhone()
+                            },
+                            onGestureSensitivityCycle = {
+                                gestureSensitivity = (gestureSensitivity + 1) % 3
+                                getSharedPreferences("WEAR_PREF", Context.MODE_PRIVATE).edit()
+                                    .putInt("GESTURE_SENSITIVITY", gestureSensitivity).apply()
+                                sendSettingsToPhone()
                             }
                         )
                     }
@@ -188,6 +209,8 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
 
     override fun onResume() {
         super.onResume()
+        appResumeTime = System.currentTimeMillis()
+        lastGestureTime = System.currentTimeMillis()
         Wearable.getDataClient(this).addListener(this)
         Wearable.getMessageClient(this).addListener(this)
         registerSensorIfNeeded()
@@ -230,17 +253,49 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
             } catch (e: Exception) {
                 Log.e(TAG, "Error parsing status message", e)
             }
+        } else if (messageEvent.path == "/settings_sync") {
+            try {
+                val payload = String(messageEvent.data, Charsets.UTF_8)
+                val parts = payload.split("|")
+                if (parts.size >= 3) {
+                    val enabled = parts[0].toBoolean()
+                    val mode = parts[1].toIntOrNull() ?: 0
+                    val sens = parts[2].toIntOrNull() ?: 1
+
+                    isGestureEnabled = enabled
+                    gestureActionMode = mode
+                    gestureSensitivity = sens
+
+                    getSharedPreferences("WEAR_PREF", Context.MODE_PRIVATE).edit()
+                        .putBoolean("GESTURE_START", enabled)
+                        .putInt("GESTURE_ACTION_MODE", mode)
+                        .putInt("GESTURE_SENSITIVITY", sens)
+                        .apply()
+
+                    registerSensorIfNeeded(force = true)
+                    Log.d(TAG, "Settings synced from phone: Enabled=$enabled, Mode=$mode, Sens=$sens")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error parsing settings sync", e)
+            }
         }
     }
 
-    private fun registerSensorIfNeeded() {
+    private fun sendSettingsToPhone() {
+        val payload = "$isGestureEnabled|$gestureActionMode|$gestureSensitivity"
+        sendCommandToPhone(payload, "/settings_watch")
+    }
+
+    private fun registerSensorIfNeeded(force: Boolean = false) {
         if (isGestureEnabled) {
+            if (isSensorRegistered && !force) return
             val sensor = accelSensor ?: (sensorManager?.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
                 ?: sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER))
             accelSensor = sensor
             if (sensor != null) {
                 sensorManager?.unregisterListener(this)
                 val registered = sensorManager?.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME) ?: false
+                isSensorRegistered = registered
                 Log.d(TAG, "Registered sensor for pinch: ${sensor.name}, ok=$registered")
             } else {
                 Log.w(TAG, "No motion sensor available on watch!")
@@ -252,12 +307,16 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
 
     private fun unregisterSensor() {
         sensorManager?.unregisterListener(this)
+        isSensorRegistered = false
         isFirstSample = true
         Log.d(TAG, "Sensor unregistered")
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
         if (!isGestureEnabled || isEngineStarting || event == null) return
+
+        // 1. Lớp 1 - Khóa an toàn Warm-up: Bỏ qua mọi dao động trong 2.0s đầu sau khi mở app / bật sáng
+        if (System.currentTimeMillis() - appResumeTime < 2000L) return
 
         val x = event.values[0]
         val y = event.values[1]
@@ -269,7 +328,11 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
         if (event.sensor.type == Sensor.TYPE_LINEAR_ACCELERATION) {
             // Gia tốc tuyến tính đã khử trọng lực
             magnitude = Math.sqrt((x * x + y * y + z * z).toDouble())
-            threshold = 12.0 // Ngưỡng nhạy tối ưu cho cử chỉ búng tay
+            threshold = when (gestureSensitivity) {
+                0 -> 26.0 // Thấp (Chống nhầm cao - yêu cầu búng dứt khoát)
+                2 -> 16.0 // Cao (Dễ nhận)
+                else -> 21.0 // Vừa (Mặc định khuyên dùng)
+            }
         } else {
             // Cảm biến gia tốc chuẩn: Tính delta biến thiên (jerk)
             if (isFirstSample) {
@@ -282,24 +345,38 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
             val dz = z - lastZ
             lastX = x; lastY = y; lastZ = z
             magnitude = Math.sqrt((dx * dx + dy * dy + dz * dz).toDouble())
-            threshold = 9.0 // Ngưỡng jerk phát hiện giật cổ tay/búng tay
+            threshold = when (gestureSensitivity) {
+                0 -> 22.0 // Thấp
+                2 -> 14.0 // Cao
+                else -> 18.0 // Vừa
+            }
         }
 
         if (magnitude > threshold) {
             val currentTime = System.currentTimeMillis()
-            if (currentTime - lastGestureTime > 1500) { // Cooldown 1.5s
+            if (currentTime - lastGestureTime > 2500L) { // Cooldown 2.5s chống kích hoạt lặp
                 lastGestureTime = currentTime
-                Log.d(TAG, "⚡ BÚNG TAY THÀNH CÔNG! Mag: $magnitude | VehicleOn: $isVehicleOn")
+                Log.d(TAG, "⚡ BÚNG TAY THÀNH CÔNG! Mag: $magnitude (ngưỡng: $threshold) | VehicleOn: $isVehicleOn | Mode: $gestureActionMode")
 
                 triggerWatchVibration()
 
-                if (isVehicleOn) {
-                    // Xe đang bật điện -> Búng tay đề nổ máy (Lệnh "2")
-                    triggerEngineStart()
+                if (gestureActionMode == 0) {
+                    // Chế độ 0 (MODE_START_ONLY - An toàn tối đa): Chỉ cho phép Đề nổ khi xe ĐÃ BẬT
+                    if (isVehicleOn) {
+                        Log.d(TAG, "Búng tay đề máy (Chế độ Start-only)")
+                        triggerEngineStart()
+                    } else {
+                        Log.d(TAG, "Bỏ qua búng tay vì xe đang TẮT (Chế độ an toàn Start-only)")
+                    }
                 } else {
-                    // Xe đang tắt -> Búng tay mở khóa điện (Lệnh "1")
-                    Log.d(TAG, "Búng tay bật xe (Lệnh 1)")
-                    sendCommandToPhone("1")
+                    // Chế độ 1 (MODE_TOGGLE_AND_START): Bật xe khi tắt, Đề nổ xe khi bật
+                    if (isVehicleOn) {
+                        Log.d(TAG, "Búng tay đề nổ máy (Lệnh 2)")
+                        triggerEngineStart()
+                    } else {
+                        Log.d(TAG, "Búng tay bật xe (Lệnh 1)")
+                        sendCommandToPhone("1")
+                    }
                 }
             }
         }
@@ -701,8 +778,12 @@ fun SettingsScreen(
     isEspConnected: Boolean,
     isAutoStartEnabled: Boolean,
     isGestureEnabled: Boolean,
+    gestureMode: Int,
+    gestureSensitivity: Int,
     onAutoStartToggle: (Boolean) -> Unit,
-    onGestureToggle: (Boolean) -> Unit
+    onGestureToggle: (Boolean) -> Unit,
+    onGestureModeCycle: () -> Unit,
+    onGestureSensitivityCycle: () -> Unit
 ) {
     val scrollState = rememberScalingLazyListState()
 
@@ -739,6 +820,28 @@ fun SettingsScreen(
             )
         }
 
+        if (isGestureEnabled) {
+            item {
+                ClickableSettingItem(
+                    title = "Chế độ cử chỉ",
+                    value = if (gestureMode == 0) "Chỉ đề khi bật" else "Bật & Đề xe",
+                    onClick = onGestureModeCycle
+                )
+            }
+
+            item {
+                ClickableSettingItem(
+                    title = "Độ nhạy búng tay",
+                    value = when (gestureSensitivity) {
+                        0 -> "Thấp (26 m/s²)"
+                        2 -> "Cao (16 m/s²)"
+                        else -> "Vừa (21 m/s²)"
+                    },
+                    onClick = onGestureSensitivityCycle
+                )
+            }
+        }
+
         item { Spacer(modifier = Modifier.height(6.dp)) }
 
         item { StatusItem("Điện thoại", isPhoneConnected) }
@@ -753,6 +856,25 @@ fun SettingsScreen(
             )
         }
     }
+}
+
+@Composable
+fun ClickableSettingItem(title: String, value: String, onClick: () -> Unit) {
+    Chip(
+        onClick = onClick,
+        label = {
+            Column {
+                Text(title, fontSize = 9.sp, color = Color.Gray)
+                Text(value, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFFD600))
+            }
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+        colors = ChipDefaults.chipColors(
+            backgroundColor = Color(0xFF1C1C1E)
+        )
+    )
 }
 
 @Composable

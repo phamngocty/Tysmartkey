@@ -472,6 +472,7 @@ class MainActivity : AppCompatActivity() {
         val btnSyncWatchNow = findViewById<AppCompatButton?>(R.id.btnSyncWatchNow)
         btnSyncWatchNow?.setOnClickListener {
             WatchSyncHelper.syncCurrentStateToWatch(this)
+            WatchSyncHelper.syncWearSettingsToWatch(this)
             WatchSyncHelper.checkWatchConnection(this) { isConn, name ->
                 updateWatchStatusUI(isConn, name)
                 runOnUiThread {
@@ -484,8 +485,23 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        val btnWatchGestureSettings = findViewById<AppCompatButton?>(R.id.btnWatchGestureSettings)
+        btnWatchGestureSettings?.setOnClickListener {
+            showWearGestureSettingsDialog()
+        }
+
         WatchSyncHelper.onWatchConnectionStatusChanged = { isConn, name ->
             updateWatchStatusUI(isConn, name)
+        }
+
+        WatchSyncHelper.onWearSettingsChangedFromWatch = { enabled, mode, sens ->
+            runOnUiThread {
+                Toast.makeText(
+                    this,
+                    "⌚ Đồng hồ đã đổi: ${if (enabled) "Bật" else "Tắt"} cử chỉ (Chế độ: ${if (mode == 0) "Chỉ đề" else "Bật & Đề"})",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
         }
 
         // Kiểm tra ban đầu
@@ -4375,5 +4391,73 @@ class MainActivity : AppCompatActivity() {
         }
 
         override fun getItemCount() = items.size
+    }
+
+    private fun showWearGestureSettingsDialog() {
+        val prefs = getSharedPreferences("BT_PREF", Context.MODE_PRIVATE)
+        val isEnabled = prefs.getBoolean("WEAR_GESTURE_ENABLED", true)
+        val currentMode = prefs.getInt("WEAR_GESTURE_MODE", 0) // 0: Start only, 1: Toggle & Start
+        val currentSens = prefs.getInt("WEAR_GESTURE_SENSITIVITY", 1) // 0: Low, 1: Med, 2: High
+
+        val dialogView = layoutInflater.inflate(R.layout.dialog_wear_gesture_settings, null)
+        val dialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .create()
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+        val btnClose = dialogView.findViewById<ImageButton>(R.id.btnCloseWearGestureDialog)
+        val swEnable = dialogView.findViewById<SwitchCompat>(R.id.swEnableWearGesture)
+        val layoutOptions = dialogView.findViewById<LinearLayout>(R.id.layoutGestureOptions)
+        val rgMode = dialogView.findViewById<RadioGroup>(R.id.rgGestureMode)
+        val rbModeStartOnly = dialogView.findViewById<RadioButton>(R.id.rbModeStartOnly)
+        val rbModeToggleAndStart = dialogView.findViewById<RadioButton>(R.id.rbModeToggleAndStart)
+        val rgSens = dialogView.findViewById<RadioGroup>(R.id.rgGestureSensitivity)
+        val rbSensLow = dialogView.findViewById<RadioButton>(R.id.rbSensLow)
+        val rbSensMed = dialogView.findViewById<RadioButton>(R.id.rbSensMed)
+        val rbSensHigh = dialogView.findViewById<RadioButton>(R.id.rbSensHigh)
+        val btnSave = dialogView.findViewById<AppCompatButton>(R.id.btnSaveWearGestureSettings)
+
+        // Trạng thái ban đầu
+        swEnable?.isChecked = isEnabled
+        layoutOptions?.visibility = if (isEnabled) View.VISIBLE else View.GONE
+        swEnable?.setOnCheckedChangeListener { _, isChecked ->
+            layoutOptions?.visibility = if (isChecked) View.VISIBLE else View.GONE
+        }
+
+        if (currentMode == 1) {
+            rbModeToggleAndStart?.isChecked = true
+        } else {
+            rbModeStartOnly?.isChecked = true
+        }
+
+        when (currentSens) {
+            0 -> rbSensLow?.isChecked = true
+            2 -> rbSensHigh?.isChecked = true
+            else -> rbSensMed?.isChecked = true
+        }
+
+        btnClose?.setOnClickListener { dialog.dismiss() }
+
+        btnSave?.setOnClickListener {
+            val enabled = swEnable?.isChecked ?: true
+            val mode = if (rbModeToggleAndStart?.isChecked == true) 1 else 0
+            val sens = when {
+                rbSensLow?.isChecked == true -> 0
+                rbSensHigh?.isChecked == true -> 2
+                else -> 1
+            }
+
+            prefs.edit()
+                .putBoolean("WEAR_GESTURE_ENABLED", enabled)
+                .putInt("WEAR_GESTURE_MODE", mode)
+                .putInt("WEAR_GESTURE_SENSITIVITY", sens)
+                .apply()
+
+            WatchSyncHelper.syncWearSettingsToWatch(this, enabled, mode, sens)
+            Toast.makeText(this, "🟢 Đã lưu & đồng bộ cử chỉ sang Đồng hồ!", Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
+        }
+
+        dialog.show()
     }
 }

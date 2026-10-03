@@ -21,6 +21,7 @@ object WatchSyncHelper {
     var isWatchConnected: Boolean = false
     var connectedWatchName: String? = null
     var onWatchConnectionStatusChanged: ((Boolean, String?) -> Unit)? = null
+    var onWearSettingsChangedFromWatch: ((Boolean, Int, Int) -> Unit)? = null
 
     /**
      * Kiểm tra trạng thái kết nối với đồng hồ Wear OS qua Google Play Services NodeClient
@@ -113,6 +114,42 @@ object WatchSyncHelper {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error in syncCurrentStateToWatch", e)
+        }
+    }
+
+    /**
+     * Đồng bộ cấu hình cử chỉ Wear OS từ Điện thoại sang Đồng hồ
+     */
+    fun syncWearSettingsToWatch(context: Context, enabled: Boolean? = null, mode: Int? = null, sens: Int? = null) {
+        try {
+            val prefs = context.getSharedPreferences("BT_PREF", Context.MODE_PRIVATE)
+            val isEnabled = enabled ?: prefs.getBoolean("WEAR_GESTURE_ENABLED", true)
+            val actionMode = mode ?: prefs.getInt("WEAR_GESTURE_MODE", 0)
+            val sensitivity = sens ?: prefs.getInt("WEAR_GESTURE_SENSITIVITY", 1)
+
+            // Lưu lại giá trị mới nhất
+            prefs.edit()
+                .putBoolean("WEAR_GESTURE_ENABLED", isEnabled)
+                .putInt("WEAR_GESTURE_MODE", actionMode)
+                .putInt("WEAR_GESTURE_SENSITIVITY", sensitivity)
+                .apply()
+
+            val payload = "$isEnabled|$actionMode|$sensitivity"
+            Wearable.getNodeClient(context).connectedNodes.addOnSuccessListener { nodes ->
+                for (node in nodes) {
+                    Wearable.getMessageClient(context).sendMessage(
+                        node.id,
+                        "/settings_sync",
+                        payload.toByteArray(Charsets.UTF_8)
+                    ).addOnSuccessListener {
+                        Log.d(TAG, "Synced wear settings to ${node.displayName}: $payload")
+                    }.addOnFailureListener { e ->
+                        Log.e(TAG, "Failed syncing wear settings to ${node.displayName}", e)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in syncWearSettingsToWatch", e)
         }
     }
 }

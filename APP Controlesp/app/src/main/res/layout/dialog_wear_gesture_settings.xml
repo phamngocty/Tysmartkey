@@ -1,0 +1,238 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/card_cyber_bg"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <!-- Header: Icon & Title -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_marginBottom="16dp">
+
+        <FrameLayout
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/avatar_fp_bg">
+
+            <ImageView
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_gravity="center"
+                android:src="@drawable/ic_watch_smart"
+                app:tint="@color/gold_primary" />
+        </FrameLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="CÀI ĐẶT CỬ CHỈ ĐỒNG HỒ"
+                android:textColor="@color/gold_primary"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.04" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Tùy biến bộ lọc an toàn và hành vi cử chỉ Wear OS"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <ImageButton
+            android:id="@+id/btnCloseWearGestureDialog"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_delete"
+            app:tint="@color/text_secondary"
+            android:contentDescription="Đóng" />
+    </LinearLayout>
+
+    <!-- Master Switch: Bật/Tắt Cử chỉ Búng tay -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/card_luxury_gold_bg"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="12dp"
+        android:layout_marginBottom="14dp">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Kích hoạt búng tay đề máy"
+                android:textColor="@color/white"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Dùng cảm biến gia tốc trên Wear OS nhận diện cử chỉ"
+                android:textColor="@color/text_secondary"
+                android:textSize="10.5sp" />
+        </LinearLayout>
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/swEnableWearGesture"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/layoutGestureOptions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- Nhóm 1: Chọn Chế độ Hành vi -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="CHẾ ĐỘ HÀNH VI CỬ CHỈ"
+            android:textColor="@color/gold_primary"
+            android:textSize="11.5sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.04"
+            android:layout_marginBottom="6dp" />
+
+        <RadioGroup
+            android:id="@+id/rgGestureMode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="14dp">
+
+            <RadioButton
+                android:id="@+id/rbModeStartOnly"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:text="Chỉ Đề nổ khi xe ĐÃ BẬT (Khuyên dùng - An toàn 100%)"
+                android:textColor="@color/white"
+                android:textSize="11.5sp"
+                android:buttonTint="@color/gold_primary"
+                android:paddingVertical="4dp" />
+
+            <RadioButton
+                android:id="@+id/rbModeToggleAndStart"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Bật khóa điện khi Tắt &amp; Đề nổ khi Bật"
+                android:textColor="@color/white"
+                android:textSize="11.5sp"
+                android:buttonTint="@color/gold_primary"
+                android:paddingVertical="4dp" />
+        </RadioGroup>
+
+        <!-- Nhóm 2: Độ nhạy búng tay -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ĐỘ NHẠY CẢM BIẾN GIA TỐC"
+            android:textColor="@color/gold_primary"
+            android:textSize="11.5sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.04"
+            android:layout_marginBottom="6dp" />
+
+        <RadioGroup
+            android:id="@+id/rgGestureSensitivity"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp">
+
+            <RadioButton
+                android:id="@+id/rbSensLow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Thấp (26 m/s² - Yêu cầu búng mạnh dứt khoát, chống nhầm tối đa)"
+                android:textColor="@color/white"
+                android:textSize="11.5sp"
+                android:buttonTint="@color/gold_primary"
+                android:paddingVertical="4dp" />
+
+            <RadioButton
+                android:id="@+id/rbSensMed"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:text="Vừa (21 m/s² - Tiêu chuẩn khuyên dùng)"
+                android:textColor="@color/white"
+                android:textSize="11.5sp"
+                android:buttonTint="@color/gold_primary"
+                android:paddingVertical="4dp" />
+
+            <RadioButton
+                android:id="@+id/rbSensHigh"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Cao (16 m/s² - Nhạy, búng nhẹ)"
+                android:textColor="@color/white"
+                android:textSize="11.5sp"
+                android:buttonTint="@color/gold_primary"
+                android:paddingVertical="4dp" />
+        </RadioGroup>
+
+        <!-- Ghi chú về Grace Period -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/header_icon_btn_bg"
+            android:orientation="horizontal"
+            android:padding="10dp"
+            android:layout_marginBottom="16dp">
+
+            <ImageView
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:layout_marginTop="1dp"
+                android:src="@drawable/ic_shield"
+                app:tint="@color/accent_cyan" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:text="Khóa an toàn 2.0 giây: Cảm biến sẽ tự động bỏ qua mọi chuyển động trong 2 giây đầu tiên kể từ lúc bạn mở app hoặc bật sáng màn hình trên đồng hồ."
+                android:textColor="@color/text_secondary"
+                android:textSize="10sp"
+                android:lineSpacingExtra="2dp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Save & Sync Button -->
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/btnSaveWearGestureSettings"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:background="@drawable/button_background"
+        android:text="💾 LƯU &amp; ĐỒNG BỘ SANG ĐỒNG HỒ"
+        android:textAllCaps="false"
+        android:textColor="@color/white"
+        android:textSize="13sp"
+        android:textStyle="bold" />
+
+</LinearLayout>
