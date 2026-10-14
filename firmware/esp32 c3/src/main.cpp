@@ -141,16 +141,20 @@ unsigned long pendingIdleLedUntil = 0;
 float batteryVoltageCalib = 12.0f / 23.6f;
 
 // ==========================================
-// 💤 QUẢN LÝ NGUỒN 2 TẦNG (POWER MANAGEMENT)
+// 💤 QUẢN LÝ TIẾT KIỆM NĂNG LƯỢNG 3 CẤP ĐỘ (POWER MANAGEMENT)
 // ==========================================
 unsigned long lastActivityTime = 0;
-const unsigned long DEEP_SLEEP_TIMEOUT_MS = 24ULL * 60ULL * 60ULL * 1000ULL; // 24 giờ = 86,400,000 ms
+const unsigned long FAST_BLE_TIMEOUT_MS = 10ULL * 60ULL * 1000ULL;           // Cấp 1: 10 phút Fast BLE (100-200ms)
+const unsigned long TIER1_POWER_SAVING_TIMEOUT_MS = 60ULL * 60ULL * 1000ULL; // Cấp 2: 60 phút Tiết kiệm (1280ms) -> Cấp 3: Deep Sleep
 bool isPowerSavingAdvertising = false;
 bool wakeTriggeredByFingerprint = false;
 bool wakeTriggeredByVibration = false;
 bool wakeTriggeredByRf = false;
+uint32_t currentCpuFreqMhz = 160;
 
 // Khai báo trước các hàm quản lý nguồn & hành động
+void setPowerCpuFrequency(uint32_t mhz);
+bool r503Sleep();
 void updateBleAdvertisingMode(bool fast);
 void enterTier2DeepSleep();
 void handleVibrationDetected();
@@ -253,6 +257,7 @@ void sendTelemetry()
 #define R503_CMD_READ_SYS_PARA 0x0F  // Đọc tham số hệ thống cảm biến
 #define R503_CMD_VFY_PWD 0x13        // Xác thực mật khẩu bắt tay cảm biến
 #define R503_CMD_TEMPLATE_COUNT 0x1D // Đọc số lượng vân tay hợp lệ hiện có
+#define R503_CMD_SLEEP 0x33          // Đưa cảm biến R503 vào chế độ ngủ sâu Standby (Opcode 0x33)
 #define R503_CMD_AURA_LED 0x35       // Điều khiển đèn LED nhẫn hào quang (Aura LED)
 
 // Các chế độ Aura LED RGB (Opcode 0x35)
@@ -662,6 +667,33 @@ bool r503EmptyDatabase()
     return receiveAckPacket(code);
 }
 
+// 8b. Đưa R503 vào chế độ ngủ sâu Standby (Opcode 0x33) để triệt tiêu dòng rò (dòng giảm từ ~30mA xuống ~15uA)
+// Mạch cảm ứng điện dung ngón tay (chân WAKE GPIO 3) vẫn hoạt động độc lập để đánh thức MCU khi chạm
+bool r503Sleep()
+{
+    if (!r503Ready)
+        return false;
+    sendCommandPacket(R503_CMD_SLEEP, nullptr, 0);
+    uint8_t code = 0xFF;
+    bool ok = receiveAckPacket(code, nullptr, nullptr, 150);
+    if (ok)
+    {
+        Serial.println("💤 [R503] Cảm biến vân tay đã vào chế độ ngủ sâu Standby (Opcode 0x33).");
+    }
+    return ok;
+}
+
+// Điều chỉnh xung nhịp CPU thông minh (160MHz khi xử lý / 40MHz khi xe khóa tiết kiệm điện)
+void setPowerCpuFrequency(uint32_t mhz)
+{
+    if (currentCpuFreqMhz != mhz)
+    {
+        setCpuFrequencyMhz(mhz);
+        currentCpuFreqMhz = getCpuFrequencyMhz();
+        Serial.printf("⚡ [POWER] Điều chỉnh xung nhịp CPU: %d MHz\n", currentCpuFreqMhz);
+    }
+}
+
 // Khai báo trước hàm trích xuất ảnh chuẩn
 bool streamR503ImageOverBle();
 
@@ -793,7 +825,17 @@ void setVehicleUnlock(bool unlock, bool saveFlash = true, bool notify = true)
     isUnlocked = unlock;
     digitalWrite(RELAY1_PIN, isUnlocked ? HIGH : LOW);
     lastActivityTime = millis();
-    updateBleAdvertisingMode(unlock);
+
+    if (unlock)
+    {
+        setPowerCpuFrequency(160); // Mở khóa xe -> nâng xung CPU lên 160MHz
+        updateBleAdvertisingMode(true);
+    }
+    else
+    {
+        updateBleAdvertisingMode(true); // Xe vừa khóa -> 10 phút đầu quảng bá nhanh (Fast BLE 100-200ms)
+        setPowerCpuFrequency(40);        // Hạ xung CPU xuống 40MHz tiết kiệm điện
+    }
 
     if (saveFlash)
     {
@@ -928,18 +970,20 @@ void handleVibrationDetected()
     }
 }
 
-// Kích hoạt Tầng 2: Deep Sleep (Siêu tiết kiệm pin sau 24h hoặc qua lệnh từ App)
+// Kích hoạt Tầng 3: Deep Sleep (Siêu tiết kiệm pin sau 60 phút hoặc qua lệnh từ App)
 void enterTier2DeepSleep()
 {
     Serial.println("\n==============================================================");
-    Serial.println("   💤 [POWER] KÍCH HOẠT TẦNG 2: DEEP SLEEP (SIÊU TIẾT KIỆM)   ");
+    Serial.println("   💤 [POWER] KÍCH HOẠT DEEP SLEEP (SIÊU TIẾT KIỆM NĂNG LƯỢNG) ");
     Serial.println("==============================================================");
 
-    // 1. Tắt đèn Aura LED trên R503 để triệt tiêu dòng rò
+    // 1. Tắt đèn Aura LED trên R503 và đưa cảm biến vào chế độ ngủ sâu để triệt tiêu dòng rò
     if (r503Ready)
     {
         r503SetAuraLed(LED_MODE_OFF, 0, 0, 0);
-        delay(60);
+        delay(40);
+        r503Sleep();
+        delay(40);
     }
 
     // 2. Đảm bảo trạng thái Relay an toàn và tắt LED Onboard
@@ -2503,6 +2547,8 @@ void handleFingerprintTouch()
     if (isEnrolling || isCapturingImage)
         return; // Bảo vệ: Không quét kích hoạt xe khi đang trong chu trình thêm hoặc chụp ảnh!
 
+    setPowerCpuFrequency(160); // Nâng CPU lên 160MHz để xử lý so khớp và truyền nhận UART với R503 tức thì
+
     if (!r503Ready)
     {
         // Thử thăm dò lại cảm biến nếu trước đó chưa bắt tay được
@@ -2514,6 +2560,10 @@ void handleFingerprintTouch()
         }
         else
         {
+            if (!isUnlocked && !deviceConnected)
+            {
+                setPowerCpuFrequency(40);
+            }
             return;
         }
     }
@@ -2540,6 +2590,11 @@ void handleFingerprintTouch()
             delay(50);
         }
         updateIdleLed();
+        if (!isUnlocked && !deviceConnected)
+        {
+            r503Sleep();
+            setPowerCpuFrequency(40);
+        }
         return;
     }
 
@@ -2551,6 +2606,11 @@ void handleFingerprintTouch()
         setR503Led(FINGERPRINT_LED_BREATHING, FINGERPRINT_LED_BLUE, 200, 1);
         delay(300);
         updateIdleLed();
+        if (!isUnlocked && !deviceConnected)
+        {
+            r503Sleep();
+            setPowerCpuFrequency(40);
+        }
         return;
     }
 
@@ -2568,6 +2628,11 @@ void handleFingerprintTouch()
         }
         if (millis() - pressStart < (unsigned long)touchHoldMs)
         {
+            if (!isUnlocked && !deviceConnected)
+            {
+                r503Sleep();
+                setPowerCpuFrequency(40);
+            }
             return;
         }
     }
@@ -2743,12 +2808,22 @@ void handleFingerprintTouch()
         delay(200);
         pendingIdleLedUpdate = false;
         updateIdleLed();
+        if (!isUnlocked && !deviceConnected)
+        {
+            r503Sleep();
+            setPowerCpuFrequency(40);
+        }
     }
     else
     {
         // 1. Chặn sớm nếu không có ngón tay thực sự (nhiễu điện / nước mưa chạm lướt)
         if (!fingerDetected)
         {
+            if (!isUnlocked && !deviceConnected)
+            {
+                r503Sleep();
+                setPowerCpuFrequency(40);
+            }
             return;
         }
 
@@ -2796,6 +2871,11 @@ void handleFingerprintTouch()
             delay(50);
         }
         updateIdleLed();
+        if (!isUnlocked && !deviceConnected)
+        {
+            r503Sleep();
+            setPowerCpuFrequency(40);
+        }
     }
 }
 
@@ -3601,6 +3681,7 @@ class ServerCallbacks : public NimBLEServerCallbacks
     {
         deviceConnected = true;
         lastActivityTime = millis();
+        setPowerCpuFrequency(160); // Nâng CPU lên 160MHz để đảm bảo tốc độ phản hồi BLE và bảo mật AES-128
         Serial.println("BLE Client đã kết nối!");
         setR503Led(FINGERPRINT_LED_FLASHING, FINGERPRINT_LED_BLUE, 50, 1);
         pendingIdleLedUntil = millis() + 400; // Sau 1 nháy kết nối BLE, tự khôi phục màu đèn trạng thái xe
@@ -3698,6 +3779,8 @@ class ServerCallbacks : public NimBLEServerCallbacks
         else
         {
             updateIdleLed();
+            r503Sleep();
+            setPowerCpuFrequency(40);
         }
 
         if (isOtaUpdating)
@@ -3708,7 +3791,7 @@ class ServerCallbacks : public NimBLEServerCallbacks
         }
 
         Serial.println("Bắt đầu Advertising lại...");
-        updateBleAdvertisingMode(isUnlocked);
+        updateBleAdvertisingMode(true); // 10 phút đầu sau ngắt kết nối: Fast BLE 100-200ms
     }
 };
 
@@ -3919,9 +4002,9 @@ void setup()
 
     // 4. Khởi tạo NimBLE Server & Cấu hình SMP Security (Pairing, Bonding, Passkey AES-128)
     NimBLEDevice::init(vehicleName.c_str());
-    // Kích công suất phát sóng BLE lên mức tối đa (+21dBm) cho cả kết nối và quảng bá
-    NimBLEDevice::setPower(ESP_PWR_LVL_P21, ESP_BLE_PWR_TYPE_DEFAULT);
-    NimBLEDevice::setPower(ESP_PWR_LVL_P21, ESP_BLE_PWR_TYPE_ADV);
+    // Cấu hình công suất phát sóng BLE (+9dBm) tối ưu cho xe máy (phủ sóng 5-10m, tiết kiệm 60% điện năng so với +21dBm)
+    NimBLEDevice::setPower(ESP_PWR_LVL_P9, ESP_BLE_PWR_TYPE_DEFAULT);
+    NimBLEDevice::setPower(ESP_PWR_LVL_P9, ESP_BLE_PWR_TYPE_ADV);
     NimBLEDevice::setMTU(517); // Đặt MTU tối đa để tránh cắt cụt gói tin BLE payload
 
     // 🔐 CẤU HÌNH BẢO MẬT SMP: BONDING + MITM + SECURE CONNECTIONS (LESC P-256)
@@ -3965,19 +4048,23 @@ void setup()
     pAdvertising->setScanResponse(true);
     if (!isUnlocked)
     {
-        // Tầng 1 Power Saving: 1280ms (2048 * 0.625ms = 1280ms)
-        pAdvertising->setMinInterval(2048);
-        pAdvertising->setMaxInterval(2048);
-        isPowerSavingAdvertising = true;
-        Serial.println("🍃 BLE Advertising ban đầu: TẦNG 1 POWER SAVING (1280ms / 1.28s)");
+        // Cấp 1 (0 - 10 phút đầu): Fast Mode (100ms - 200ms) để App/Đồng hồ dễ kết nối ngay
+        pAdvertising->setMinInterval(160);
+        pAdvertising->setMaxInterval(320);
+        isPowerSavingAdvertising = false;
+        Serial.println("⚡ BLE Advertising ban đầu: CẤP 1 FAST (100ms - 200ms, 10 phút đầu)");
+        updateIdleLed();
+        r503Sleep();             // Đưa R503 về Sleep triệt tiêu dòng rò
+        setPowerCpuFrequency(40); // Hạ CPU về 40MHz
     }
     else
     {
-        // Fast mode: 100ms - 200ms
+        // Xe mở máy: Fast mode (100ms - 200ms) và CPU 160MHz
         pAdvertising->setMinInterval(160);
         pAdvertising->setMaxInterval(320);
         isPowerSavingAdvertising = false;
         Serial.println("⚡ BLE Advertising ban đầu: FAST (100ms - 200ms)");
+        setPowerCpuFrequency(160);
     }
     pAdvertising->start();
 
@@ -4064,6 +4151,10 @@ void loop()
     {
         pendingIdleLedUpdate = false;
         updateIdleLed();
+        if (!isUnlocked && !deviceConnected)
+        {
+            r503Sleep();
+        }
     }
 
     // Kiểm tra chạm ngón tay (Active LOW: Chạm = 0V / LOW trên chân WAKE)
@@ -4108,13 +4199,28 @@ void loop()
     }
 
     // -------------------------------------------------------------
-    // 💤 KIỂM TRA TỰ ĐỘNG CHUYỂN TỪ TẦNG 1 SANG TẦNG 2 (DEEP SLEEP)
+    // 💤 QUẢN LÝ TIẾT KIỆM NĂNG LƯỢNG 3 CẤP ĐỘ
+    // - Cấp 1 (0 - 10 phút): Chờ Nhanh (Fast BLE 100-200ms, CPU 40MHz, R503 Sleep)
+    // - Cấp 2 (10 - 60 phút): Tiết Kiệm (BLE 1280ms, CPU 40MHz, R503 Sleep)
+    // - Cấp 3 (> 60 phút): Deep Sleep (Ngắt RTC chạm tay GPIO 3, rung GPIO 4, remote GPIO 5)
     // -------------------------------------------------------------
-    if (!isUnlocked && !deviceConnected && !isEnrolling && !isCapturingImage)
+    if (!isUnlocked && !deviceConnected && !isEnrolling && !isCapturingImage && !isOtaUpdating)
     {
-        if (millis() - lastActivityTime >= DEEP_SLEEP_TIMEOUT_MS)
+        unsigned long inactiveMs = millis() - lastActivityTime;
+
+        // Cấp 1 -> Cấp 2: Quá 10 phút không có người kết nối, chuyển BLE sang Tiết Kiệm (1.28s)
+        if (inactiveMs >= FAST_BLE_TIMEOUT_MS && !isPowerSavingAdvertising)
         {
-            Serial.println("⏳ [POWER] Đã quá 24h không có hoạt động chạm/kết nối! Tự động chuyển sang TẦNG 2: DEEP SLEEP...");
+            Serial.println("🍃 [POWER] Đã quá 10 phút không có kết nối: Chuyển BLE sang Chế độ Tiết Kiệm (1280ms)...");
+            updateBleAdvertisingMode(false);
+            setPowerCpuFrequency(40);
+            r503Sleep();
+        }
+
+        // Cấp 2 -> Cấp 3: Quá 60 phút không có hoạt động, tự động vào Deep Sleep
+        if (inactiveMs >= TIER1_POWER_SAVING_TIMEOUT_MS)
+        {
+            Serial.println("⏳ [POWER] Đã quá 60 phút không có hoạt động! Tự động chuyển sang CẤP 3: DEEP SLEEP...");
             enterTier2DeepSleep();
         }
     }

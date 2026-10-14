@@ -1,125 +1,158 @@
-# KẾ HOẠCH TRIỂN KHAI TESTBENCH ĐỘC LẬP: AIRTAG ESP32-C3 & NAS BACKEND
-> **Mục tiêu:** Xây dựng bộ mã nguồn kiểm thử (Testbench) độc lập 100% để kiểm chứng tính năng giả lập Apple AirTag trên ESP32-C3 SuperMini kết hợp máy chủ NAS cá nhân (Anisette v3, giải mã P-224, GraphHopper).  
-> **Nguyên tắc an toàn (Zero Touch):** Tuyệt đối KHÔNG sửa đổi bất kỳ dòng mã nào trong `firmware/esp32 c3/src/main.cpp` hoặc Android App chính.  
-> **Trạng thái:** Chờ người dùng nghiệm thu testbench thành công mới tiến hành lập kế hoạch Big Update.
+# KẾ HOẠCH TRIỂN KHAI TESTBENCH ĐỘC LẬP: AIRTAG ESP32-C3 & NAS BACKEND (MULTI-USER READY)
+> **Mục tiêu:** Xây dựng bộ mã nguồn kiểm thử (Testbench) độc lập 100% để kiểm chứng toàn diện tính năng giả lập Apple AirTag (Find My Network) trên ESP32-C3 SuperMini kết hợp máy chủ NAS Backend (Anisette v3, Giải mã P-224, GraphHopper Routing) trước khi tích hợp vào hệ thống Smartkey chính.  
+> **Định hướng kiến trúc:** Chuẩn bị sẵn sàng cho quy mô nhiều người dùng (Multi-User Ecosystem), tối ưu hóa thời lượng bình ắc quy xe máy và loại bỏ độ trễ kết nối BLE.  
+> **Nguyên tắc an toàn (Zero Touch):** Tuyệt đối KHÔNG can thiệp, KHÔNG sửa đổi bất kỳ dòng mã nào trong `firmware/esp32 c3/src/main.cpp` hoặc Android App chính.  
+> **Phiên bản:** v2.0-Production-Testbench  
+> **Ngày cập nhật:** 2026-10-10  
 
 ---
 
-## 1. CẤU TRÚC FILE HỆ THỐNG TESTBENCH
+## 1. MỤC TIÊU & CÁC CẢI TIẾN TRỌNG TÂM ĐƯỢC ĐƯA VÀO TESTBENCH
+
+1. **Kiểm thử độc lập cách ly (Isolated Sandbox):**
+   - Mọi mã nguồn kiểm thử ESP32-C3 nằm riêng tại `firmware/esp32 c3/test/test_airtag/test_airtag.cpp` với cấu hình môi trường biên dịch riêng `[env:test-airtag]` trong PlatformIO.
+   - Mọi mã nguồn máy chủ nằm trong `tools/airtag_testbench/`.
+2. **Cơ chế phát sóng BLE theo sự kiện (State-Driven BLE Transition):**
+   - Không dùng cơ chế xen kẽ cứng (3s/1s) gây trễ mở xe.
+   - Trạng thái xe Khóa/Đỗ: Phát 100% Apple AirTag Beacon ($1500\text{ ms} - 2000\text{ ms}$) tiết kiệm pin.
+   - Khi có ngắt chạm vân tay R503 (Touch Wake) hoặc kích hoạt mở xe: Lập tức ngắt AirTag, chuyển $100\%$ sang BLE Connectable với tần suất cao (40ms) để điện thoại kết nối tức thì trong $0.2\text{s}$.
+3. **Bảo vệ bình ắc quy xe (Battery-Safe Guard):**
+   - Giãn Advertising Interval từ 320ms lên $1500\text{ ms} - 2000\text{ ms}$ $\rightarrow$ Giảm dòng tiêu thụ trung bình từ ~25mA xuống dưới $3 - 5\text{ mA}$.
+   - Tích hợp kiểm tra điện áp bình qua ADC: Tự động ngắt phát beacon khi bình $< 11.8\text{V}$.
+4. **Kiến trúc Multi-User & An toàn bảo mật:**
+   - Quản lý theo `device_id` độc lập; Private Key mã hóa tại Database server.
+   - Chuẩn bị cơ chế Batch Fetching từ Apple qua Anisette v3 container để tránh bị Apple Rate-Limit khi có nhiều thiết bị.
+   - Cơ chế Rolling Key (xoay khóa 24h) chống cảnh báo theo dõi "AirTag Found Moving With You".
+
+---
+
+## 2. CẤU TRÚC CÂY THƯ MỤC HỆ THỐNG TESTBENCH
 
 ```text
 Tysmartkey/
 ├── docs/
-│   ├── airtag_esp32_c3_server.md          # Tài liệu đặc tả kỹ thuật gốc
-│   └── airtag_testbench_plan.md           # Kế hoạch triển khai testbench này
+│   ├── airtag_esp32_c3_server.md          # Đặc tả kiến trúc kỹ thuật chi tiết
+│   └── airtag_testbench_plan.md           # Kế hoạch hành động tổng thể này
 │
 ├── firmware/esp32 c3/
-│   ├── platformio.ini                     # Thêm target [env:test-airtag] (Không đổi env chính)
-│   ├── src/main.cpp                       # [GIỮ NGUYÊN 100%]
+│   ├── platformio.ini                     # Thêm môi trường [env:test-airtag] (Giữ nguyên env chính)
+│   ├── src/main.cpp                       # [GIỮ NGUYÊN 100% - ZERO TOUCH]
 │   └── test/
-│       ├── test_r503/                     # Test sensor hiện hữu
-│       ├── test_tzm1026/                  # Test NFC hiện hữu
 │       └── test_airtag/
-│           └── test_airtag.cpp            # Mã nguồn test BLE AirTag + Time-Multiplexing + OTA
+│           └── test_airtag.cpp            # Testbench Firmware: BLE Beacon + Event Transition + OTA Key
 │
 └── tools/
-    └── airtag_testbench/                  # Môi trường Backend & Kiểm thử trên PC / NAS
-        ├── requirements.txt               # Thư viện Python: cryptography, fastapi, httpx, uvicorn
-        ├── docker-compose.yml             # Cấu hình Anisette v3 + Backend FastAPI
-        ├── crypto_engine.py               # Thuật toán P-224 (secp224r1), sinh key & giải mã Find My
-        ├── backend_testbench.py           # FastAPI Server (4 endpoints theo đặc tả)
-        └── test_pipeline.py               # Kịch bản E2E kiểm thử tự động toàn diện
+    └── airtag_testbench/                  # Testbench Backend & Pipeline kiểm thử
+        ├── requirements.txt               # cryptography, fastapi, httpx, uvicorn
+        ├── docker-compose.yml             # Container Anisette v3 (:6969) + FastAPI Backend (:8000)
+        ├── crypto_engine.py               # NIST P-224 (secp224r1): Sinh key, dựng 31-byte frame, giải mã GPS
+        ├── backend_testbench.py           # RESTful API (KeyGen, Export-OTA, Batch-Fetch Apple, GraphHopper)
+        ├── test_pipeline.py               # Script kiểm thử E2E tự động từ toán học đến định tuyến
+        └── README_TESTING.md              # Sổ tay hướng dẫn chi tiết các bước vận hành thực tế trên NAS
 ```
 
 ---
 
-## 2. CHI TIẾT CÁC GIAI ĐOẠN TRIỂN KHAI (TASKS)
+## 3. LỘ TRÌNH 5 GIAI ĐOẠN TRIỂN KHAI (STEP-BY-STEP EXECUTION ROADMAP)
 
-### Task 1: Thiết lập môi trường Python & Thuật toán mã hóa P-224
-* **Thư mục:** `tools/airtag_testbench/`
-* **Nội dung:**
-  1. Tạo `requirements.txt` với các thư viện: `cryptography>=41.0.0`, `fastapi>=0.104.0`, `uvicorn>=0.23.0`, `httpx>=0.25.0`, `requests>=2.31.0`.
-  2. Tạo `crypto_engine.py`:
-     - Triển khai sinh cặp khóa trên đường cong chuẩn $NIST\text{ }P\text{-}224$ ($secp224r1$).
-     - Trích xuất Private Key ($28\text{ bytes}$) và Public Key ($28\text{ bytes}$ tọa độ điểm $X$).
-     - Hàm tính toán Static Random MAC từ Public Key:
-       $$\text{MAC}[0] = \text{PublicKey}[0] \mid 0\text{b}11000000,\quad \text{MAC}[1..5] = \text{PublicKey}[1..5]$$
-     - Hàm dựng khung gói tin quảng bá Apple AirTag $31\text{ bytes}$ chuẩn:
-       `0x1E, 0xFF, 0x4C, 0x00, 0x12, 0x19, 0x00` + `PublicKey[6..27]` (22 bytes) + `((PublicKey[0] >> 6) & 0x03)` + `0x00`.
-     - Hàm giải mã báo cáo vị trí Find My từ Apple (ECDH P-224 chia sẻ bí mật + KDF SHA256 + AES-GCM-128 decrypt) để trích xuất Latitude, Longitude, Accuracy, Timestamp.
-* **Tiêu chí nghiệm thu (Verification):**
-  - Chạy test unit mã hóa: Khóa sinh ra đúng 28 bytes, địa chỉ MAC đúng 2 bit cao nhất là `11`, khung 31 bytes đúng độ dài, hàm giải mã giải đúng dữ liệu mẫu.
+```mermaid
+flowchart TD
+    G1[Giai đoạn 1: Toán học P-224 & Pipeline E2E Offline] --> G2[Giai đoạn 2: Triển khai Docker Backend lên NAS]
+    G2 --> G3[Giai đoạn 3: Viết Firmware Testbench ESP32-C3]
+    G3 --> G4[Giai đoạn 4: Kiểm thử Thực tế trên Thiết bị Rời]
+    G4 --> G5[Giai đoạn 5: Đánh giá Nghiệm thu & Chuẩn bị Tích hợp]
+```
 
----
-
-### Task 2: Xây dựng dịch vụ NAS Backend FastAPI & Docker Compose
-* **Thư mục:** `tools/airtag_testbench/`
-* **Nội dung:**
-  1. Tạo `docker-compose.yml`:
-     - Container 1: `anisette` (`dadoum/anisette-v3-server:latest`) tại port `6969`.
-     - Container 2: `findmy-backend` tại port `8000`.
-  2. Tạo `backend_testbench.py` triển khai 4 endpoint REST API:
-     - `POST /api/key/generate`: Sinh cặp khóa mới, lưu vào file json/sqlite nội bộ, trả về `device_id`, `public_key_hex`, và mã C-array mẫu để copy vào test ESP32.
-     - `GET /api/key/export-ota/{device_id}`: Trả về 28 bytes binary của Public Key để nạp qua BLE.
-     - `POST /api/reports/fetch/{device_id}`: Lấy Anisette headers từ `:6969`, gửi request đến `https://gateway.icloud.com/acsnservice/fetch` (sử dụng Apple ID cấu hình), giải mã payload bằng Private Key và trả về JSON tọa độ.
-     - `GET /api/route/to-bike`: Nhận `user_lat`, `user_lon`, `device_id`, lấy vị trí mới nhất của xe, gọi GraphHopper engine nội bộ (`http://192.168.1.114:8989`), trả về Polyline đường đi, cự ly và thời gian di chuyển.
-* **Tiêu chí nghiệm thu (Verification):**
-  - Khởi chạy local FastAPI server `uvicorn backend_testbench:app --port 8000`.
-  - Swagger UI tại `http://localhost:8000/docs` hoạt động đầy đủ 4 endpoints.
+### Giai đoạn 1: Bộ công cụ Toán học Mật mã P-224 & Pipeline Tự động Offline
+* **Vị trí:** `tools/airtag_testbench/`
+* **Công việc thực hiện:**
+  1. Tạo `requirements.txt`: `cryptography>=41.0.0`, `fastapi>=0.104.0`, `uvicorn>=0.23.0`, `httpx>=0.25.0`, `requests>=2.31.0`.
+  2. Viết `crypto_engine.py`:
+     - Triển khai thuật toán $secp224r1$: Sinh Private Key ($28\text{ bytes}$) & Public Key điểm $X$ ($28\text{ bytes}$).
+     - Tính toán Static Random MAC: $\text{MAC}[0] = \text{PK}[0] \mid 0\text{xC0}$, $\text{MAC}[1..5] = \text{PK}[1..5]$.
+     - Dựng chính xác khung gói tin thô $31\text{ bytes}$ Apple Offline Finding:
+       `0x1E, 0xFF, 0x4C, 0x00, 0x12, 0x19, 0x00, PK[6..27], ((PK[0] >> 6) & 0x03), 0x00`.
+     - Hàm giải mã gói tin Apple Find My: ECDH P-224 Shared Secret + KDF SHA-256 + AES-GCM-128 để giải mã vĩ độ, kinh độ, độ chính xác và timestamp.
+  3. Viết `test_pipeline.py`:
+     - Giả lập sinh khóa $\rightarrow$ Giả lập gói tin BLE $\rightarrow$ Giả lập iPhone mã hóa GPS $\rightarrow$ Giải mã và so khớp tọa độ gốc $\rightarrow$ Gọi mô phỏng GraphHopper tính đường đi.
+* **Tiêu chí nghiệm thu (Check):**
+  - Chạy `python tools/airtag_testbench/test_pipeline.py` đạt **100% PASS** trên máy tính nội bộ.
 
 ---
 
-### Task 3: Kịch bản kiểm thử E2E tự động (End-to-End Simulation)
-* **File:** `tools/airtag_testbench/test_pipeline.py`
-* **Nội dung:**
-  - Viết kịch bản tự động kiểm thử toàn bộ luồng không cần phần cứng:
-    1. Gọi `/api/key/generate` sinh khóa mới.
-    2. Xác thực cấu trúc 31-byte BLE frame phát ra từ Public Key.
-    3. Giả lập một gói tin GPS mã hóa từ một iPhone giả lập $\rightarrow$ Gửi vào hàm giải mã $\rightarrow$ Xác nhận giải mã đúng vĩ độ/kinh độ.
-    4. Mock/Gọi GraphHopper để kiểm tra tuyến đường trả về.
-* **Tiêu chí nghiệm thu (Verification):**
-  - Chạy `python tools/airtag_testbench/test_pipeline.py` trả về `ALL TESTS PASSED: 100% SUCCESS`.
+### Giai đoạn 2: Triển khai Dịch vụ Backend & Docker Compose lên Máy chủ NAS
+* **Thông số kết nối NAS:**
+  - Host: `192.168.1.114`
+  - User: `nas152` | Port SSH: `22`
+* **Công việc thực hiện:**
+  1. Viết `backend_testbench.py` (FastAPI):
+     - `POST /api/key/generate`: Sinh cặp khóa theo `device_id`, lưu JSON/SQLite bảo mật.
+     - `GET /api/key/export-ota/{device_id}`: Xuất luồng nhị phân 28 bytes để nạp BLE OTA.
+     - `POST /api/reports/fetch/{device_id}`: Kết nối Anisette lấy headers xác thực Apple, gọi API Apple iCloud `/acsnservice/fetch`, giải mã tọa độ trả về JSON.
+     - `GET /api/route/to-bike`: Nhận tọa độ điện thoại và xe, gọi GraphHopper `:8989` trả về Polyline đường đi dẫn đường.
+  2. Viết `docker-compose.yml` triển khai 2 service:
+     - `anisette`: `dadoum/anisette-v3-server:latest` tại cổng `6969`.
+     - `findmy-backend`: FastAPI backend tại cổng `8000`.
+  3. Đẩy source code lên NAS và khởi chạy:
+     `docker compose up -d`
+* **Tiêu chí nghiệm thu (Check):**
+  - Truy cập `http://192.168.1.114:8000/docs` hiển thị Swagger UI hoạt động đầy đủ 4 endpoints.
+  - Container Anisette `http://192.168.1.114:6969` phản hồi mã xác thực Apple hợp lệ.
 
 ---
 
-### Task 4: Cấu hình Firmware Testbench trên ESP32-C3
-* **Files:**
-  - Sửa `firmware/esp32 c3/platformio.ini`: Thêm mục `[env:test-airtag]` độc lập (giữ nguyên `[env:esp32-c3]`).
-  - Tạo `firmware/esp32 c3/test/test_airtag/test_airtag.cpp`:
-    1. Quản lý bộ nhớ NVS Flash qua `Preferences.h` (Namespace: `"airtag_cfg"`, Key: `"pub_key"`, kích thước: 28 bytes).
-    2. Khởi tạo BLE stack (hỗ trợ chuyển đổi mượt mà giữa 2 mode):
-       - **Mode A - AIRTAG_MODE (3000ms):**
-         - Thiết lập Static Random MAC: `MAC[0] = PK[0] | 0xC0`, `MAC[1..5] = PK[1..5]`.
-         - Phát khung quảng bá thô 31-byte chuẩn Apple (`ADV_TYPE_NONCONN_IND`).
-         - TX Power tối đa (`+20dBm`).
-       - **Mode B - CONNECTABLE_MODE (1000ms):**
-         - Chuyển về Public MAC mặc định của ESP32.
-         - Phát quảng bá kết nối (`ADV_TYPE_IND`).
-         - Khởi tạo Custom GATT Service UUID `0xFFE0` với Characteristic `0xFFE1` (Write).
-         - Khi nhận được 28 bytes Public Key từ App/Web: Lưu vào NVS Flash và reload lại chu kỳ phát.
-    3. Log Serial chi tiết (115200 bps): Hiển thị trạng thái chuyển mode, địa chỉ MAC hiện tại, dung lượng RAM trống, và log nhận key OTA.
-* **Tiêu chí nghiệm thu (Verification):**
-  - Chạy lệnh PlatformIO: `pio run -e test-airtag` biên dịch thành công 100% không cảnh báo rò bộ nhớ.
-  - Lệnh `pio run -e esp32-c3` (firmware chính) vẫn biên dịch bình thường, hoàn toàn không bị ảnh hưởng.
+### Giai đoạn 3: Viết Firmware Testbench ESP32-C3 (`test_airtag.cpp`)
+* **Vị trí:** `firmware/esp32 c3/test/test_airtag/test_airtag.cpp` & `platformio.ini`
+* **Công việc thực hiện:**
+  1. Cấu hình môi trường riêng biệt trong `platformio.ini`:
+     ```ini
+     [env:test-airtag]
+     platform = espressif32
+     board = esp32-c3-devkitm-1
+     framework = arduino
+     build_flags = -DCORE_DEBUG_LEVEL=3
+     src_filter = +<../test/test_airtag/test_airtag.cpp>
+     ```
+  2. Triển khai logic trong `test_airtag.cpp`:
+     - Quản lý NVS Flash qua `Preferences.h` (`namespace: "airtag_cfg"`, `key: "pub_key"`).
+     - Khởi tạo BLE GAP API:
+       + **Trạng thái PARKED (Mặc định):** Gán Static Random MAC, phát khung 31 bytes Apple Beacon với interval $1500\text{ ms}$, công suất TX $+20\text{ dBm}$.
+       + **Trạng thái CONNECTABLE (Khi kích hoạt nút nhấn giả lập WAKE):** Tức thời ngắt Beacon, gán Public MAC mặc định, mở Custom GATT Service UUID `0xFFE0` / Characteristic `0xFFE1` (Write).
+       + **Cơ chế nạp Key OTA:** Khi ghi 28 bytes vào `0xFFE1`, tự động lưu vào NVS Flash và reload lại bộ phát Beacon ngay lập tức.
+     - Serial Monitor (115200 bps): Xuất thông tin chi tiết địa chỉ MAC, chế độ phát, RAM trống, và log nhận OTA.
+* **Tiêu chí nghiệm thu (Check):**
+  - Chạy `pio run -e test-airtag` biên dịch thành công 100%.
+  - Lệnh `pio run -e esp32-c3` (firmware chính) vẫn hoạt động hoàn toàn độc lập, không bị ảnh hưởng.
 
 ---
 
-### Task 5: Hướng dẫn kiểm thử thực tế trên NAS & Thiết bị thật
-* **Tài liệu:** Tạo file hướng dẫn vận hành test `tools/airtag_testbench/README_TESTING.md`.
-* **Nội dung:**
-  - Hướng dẫn deploy Docker Compose lên NAS (`192.168.1.114`).
-  - Hướng dẫn cấu hình tài khoản Apple ID thử nghiệm.
-  - Hướng dẫn dùng app nRF Connect trên điện thoại để kiểm tra:
-    + Bắt gói tin quảng bá Apple Beacon (31 bytes).
-    + Kết nối vào Service `0xFFE0` / Characteristic `0xFFE1` để nạp 28 bytes Public Key mới.
-    + Kiểm tra chu kỳ 3s / 1s chuyển mode trên Serial Monitor.
+### Giai đoạn 4: Kiểm thử Thực tế trên Phần Cứng Rời & Mạng Lưới Apple Thật
+* **Công việc thực hiện:**
+  1. Nạp `test_airtag.cpp` vào 01 mạch ESP32-C3 SuperMini rời (cắm nguồn USB/Pin dự phòng độc lập, không gắn vào xe).
+  2. Dùng App **nRF Connect for Mobile** trên điện thoại:
+     - Quét và bắt gói tin quảng bá `Manufacturer Specific Data (0x004C)` chuẩn Apple AirTag.
+     - Kích hoạt chế độ Connectable $\rightarrow$ Kết nối vào Service `0xFFE0` $\rightarrow$ Nạp thử 28 bytes Public Key mới $\rightarrow$ Xác nhận ESP32 lưu NVS và phát lại Beacon với MAC mới.
+  3. Mang ESP32-C3 ra khu vực công cộng có người dùng iPhone đi qua (hoặc để gần một iPhone không đăng nhập Apple ID quản trị).
+  4. Sau 15 - 30 phút: Gọi API `POST /api/reports/fetch/{device_id}` trên NAS để kiểm tra báo cáo tọa độ thật từ Apple iCloud trả về.
+  5. Gọi API `GET /api/route/to-bike` để kiểm tra GraphHopper vẽ đường đi tìm đến vị trí ESP32.
+* **Tiêu chí nghiệm thu (Check):**
+  - Tọa độ giải mã từ Apple phản hồi khớp với vị trí thực tế của mạch ESP32-C3 (sai số $< 15\text{m}$).
+  - Đồ thị đường đi của GraphHopper dẫn chính xác tới vị trí thiết bị.
 
 ---
 
-## 3. CHECKLIST AN TOÀN TRƯỚC KHI THỰC HIỆN
+### Giai đoạn 5: Tổng Kết Đánh Giá & Kế Hoạch Tích Hợp Vào Smartkey Chính
+* **Công việc thực hiện:**
+  - Đo dòng tiêu thụ tĩnh thực tế của mạch ESP32-C3 khi phát Beacon $1500\text{ ms}$.
+  - Đánh giá độ ổn định của container Anisette và Apple ID sau 7 ngày chạy liên tục.
+  - Lập tài liệu đặc tả bản cập nhật lớn (Big Update) để tích hợp an toàn vào `src/main.cpp` của xe máy và App Android.
 
-- [x] Không sửa `firmware/esp32 c3/src/main.cpp`.
-- [x] Không sửa mã nguồn Android App.
-- [x] Không ghi đè các cấu hình `[env:esp32-c3]` trong `platformio.ini`.
-- [x] Mọi file mới đều nằm trong thư mục test độc lập (`test/test_airtag/` và `tools/airtag_testbench/`).
-- [x] Có pipeline test tự động xác thực toán học mã hóa trước khi nạp vào mạch thật.
+---
+
+## 4. CHECKLIST BẢO MẬT & NGUYÊN TẮC AN TOÀN TUYỆT ĐỐI
+
+- [x] **Zero Touch:** Không chạm vào mã nguồn xe máy `main.cpp` khi chưa nghiệm thu 100% Giai đoạn 4.
+- [x] **Zero Conflict:** Firmware test nằm riêng trong thư mục `test/test_airtag/`.
+- [x] **Zero Leak:** Private Key của người dùng không bao giờ lưu trên thiết bị ESP32 (chỉ lưu duy nhất Public Key 28 bytes).
+- [x] **Burner Account:** Chỉ sử dụng tài khoản Apple ID thử nghiệm độc lập trên NAS.
+- [x] **Battery Safety:** Thiết kế interval $1500 - 2000\text{ ms}$ để bảo toàn ắc quy xe.
