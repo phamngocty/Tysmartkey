@@ -2,6 +2,7 @@ package com.example.control_esp
 
 import android.content.Context
 import android.util.Log
+import com.google.android.gms.wearable.CapabilityClient
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
 
@@ -118,7 +119,9 @@ object WatchSyncHelper {
     }
 
     /**
-     * Đồng bộ cấu hình cử chỉ Wear OS từ Điện thoại sang Đồng hồ
+     * Đồng bộ cấu hình cử chỉ Wear OS từ Điện thoại sang Đồng hồ.
+     * Sử dụng đồng thời cả DataClient (lưu trữ đồng bộ bền vững qua Google Play Services)
+     * và MessageClient (truyền tức thời nếu đồng hồ đang mở foreground).
      */
     fun syncWearSettingsToWatch(context: Context, enabled: Boolean? = null, mode: Int? = null, sens: Int? = null) {
         try {
@@ -127,29 +130,73 @@ object WatchSyncHelper {
             val actionMode = mode ?: prefs.getInt("WEAR_GESTURE_MODE", 0)
             val sensitivity = sens ?: prefs.getInt("WEAR_GESTURE_SENSITIVITY", 1)
 
-            // Lưu lại giá trị mới nhất
+            // Lưu lại giá trị mới nhất vào SharedPreferences của điện thoại
             prefs.edit()
                 .putBoolean("WEAR_GESTURE_ENABLED", isEnabled)
                 .putInt("WEAR_GESTURE_MODE", actionMode)
                 .putInt("WEAR_GESTURE_SENSITIVITY", sensitivity)
                 .apply()
 
+            // 1. Đồng bộ bền vững qua Google Play Services DataClient (đảm bảo đồng hồ luôn nhận được kể cả khi mở sau)
+            val putDataMapReq = PutDataMapRequest.create("/wear_settings")
+            putDataMapReq.dataMap.putBoolean("gesture_enabled", isEnabled)
+            putDataMapReq.dataMap.putInt("gesture_mode", actionMode)
+            putDataMapReq.dataMap.putInt("gesture_sensitivity", sensitivity)
+            putDataMapReq.dataMap.putLong("timestamp", System.currentTimeMillis())
+
+            val putDataReq = putDataMapReq.asPutDataRequest()
+            putDataReq.setUrgent()
+
+            Wearable.getDataClient(context).putDataItem(putDataReq)
+                .addOnSuccessListener {
+                    Log.d(TAG, "Synced wear settings via DataClient: enabled=$isEnabled, mode=$actionMode, sens=$sensitivity")
+                }
+                .addOnFailureListener { e ->
+                    Log.w(TAG, "Failed syncing wear settings via DataClient", e)
+                }
+
+            // 2. Gửi thêm qua MessageClient để cập nhật tức thời (<10ms) nếu đồng hồ đang hiển thị
             val payload = "$isEnabled|$actionMode|$sensitivity"
-            Wearable.getNodeClient(context).connectedNodes.addOnSuccessListener { nodes ->
-                for (node in nodes) {
-                    Wearable.getMessageClient(context).sendMessage(
-                        node.id,
-                        "/settings_sync",
-                        payload.toByteArray(Charsets.UTF_8)
-                    ).addOnSuccessListener {
-                        Log.d(TAG, "Synced wear settings to ${node.displayName}: $payload")
-                    }.addOnFailureListener { e ->
-                        Log.e(TAG, "Failed syncing wear settings to ${node.displayName}", e)
+            Wearable.getNodeClient(context).connectedNodes
+                .addOnSuccessListener { nodes ->
+                    if (nodes.isNotEmpty()) {
+                        for (node in nodes) {
+                            sendSettingsMessage(context, node.id, node.displayName, payload)
+                        }
+                    } else {
+                        fallbackSendSettingsCapability(context, payload)
                     }
                 }
-            }
+                .addOnFailureListener {
+                    fallbackSendSettingsCapability(context, payload)
+                }
         } catch (e: Exception) {
             Log.e(TAG, "Error in syncWearSettingsToWatch", e)
         }
+    }
+
+    private fun sendSettingsMessage(context: Context, nodeId: String, displayName: String, payload: String) {
+        Wearable.getMessageClient(context).sendMessage(
+            nodeId,
+            "/settings_sync",
+            payload.toByteArray(Charsets.UTF_8)
+        ).addOnSuccessListener {
+            Log.d(TAG, "Synced wear settings to $displayName: $payload")
+        }.addOnFailureListener { e ->
+            Log.e(TAG, "Failed syncing wear settings to $displayName", e)
+        }
+    }
+
+    private fun fallbackSendSettingsCapability(context: Context, payload: String) {
+        Wearable.getCapabilityClient(context)
+            .getCapability("esp32_control", CapabilityClient.FILTER_REACHABLE)
+            .addOnSuccessListener { capabilityInfo ->
+                for (node in capabilityInfo.nodes) {
+                    sendSettingsMessage(context, node.id, node.displayName, payload)
+                }
+            }
+            .addOnFailureListener { e ->
+                Log.w(TAG, "Failed finding capability nodes for settings sync", e)
+            }
     }
 }

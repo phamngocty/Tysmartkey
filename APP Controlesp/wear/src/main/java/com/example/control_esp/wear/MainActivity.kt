@@ -1,6 +1,7 @@
 package com.example.control_esp.wear
 
 import android.content.Context
+import android.net.Uri
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -83,6 +84,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
         isGestureEnabled = prefs.getBoolean("GESTURE_START", true)
         gestureActionMode = prefs.getInt("GESTURE_ACTION_MODE", 0) // Mặc định 0: Chỉ đề khi xe bật
         gestureSensitivity = prefs.getInt("GESTURE_SENSITIVITY", 1) // Mặc định 1: Vừa
+        loadSettingsFromDataClient()
 
         // 2. Khởi tạo SensorManager an toàn ngay trong onCreate (trước khi Compose hiển thị)
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
@@ -213,6 +215,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
         lastGestureTime = System.currentTimeMillis()
         Wearable.getDataClient(this).addListener(this)
         Wearable.getMessageClient(this).addListener(this)
+        loadSettingsFromDataClient()
         registerSensorIfNeeded()
     }
 
@@ -261,23 +264,54 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
                     val enabled = parts[0].toBoolean()
                     val mode = parts[1].toIntOrNull() ?: 0
                     val sens = parts[2].toIntOrNull() ?: 1
-
-                    isGestureEnabled = enabled
-                    gestureActionMode = mode
-                    gestureSensitivity = sens
-
-                    getSharedPreferences("WEAR_PREF", Context.MODE_PRIVATE).edit()
-                        .putBoolean("GESTURE_START", enabled)
-                        .putInt("GESTURE_ACTION_MODE", mode)
-                        .putInt("GESTURE_SENSITIVITY", sens)
-                        .apply()
-
-                    registerSensorIfNeeded(force = true)
-                    Log.d(TAG, "Settings synced from phone: Enabled=$enabled, Mode=$mode, Sens=$sens")
+                    applyWearSettings(enabled, mode, sens)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error parsing settings sync", e)
             }
+        }
+    }
+
+    private fun applyWearSettings(enabled: Boolean, mode: Int, sens: Int) {
+        runOnUiThread {
+            isGestureEnabled = enabled
+            gestureActionMode = mode
+            gestureSensitivity = sens
+        }
+        getSharedPreferences("WEAR_PREF", Context.MODE_PRIVATE).edit()
+            .putBoolean("GESTURE_START", enabled)
+            .putInt("GESTURE_ACTION_MODE", mode)
+            .putInt("GESTURE_SENSITIVITY", sens)
+            .apply()
+
+        registerSensorIfNeeded(force = true)
+        Log.d(TAG, "Applied wear settings: enabled=$enabled, mode=$mode, sens=$sens")
+    }
+
+    private fun loadSettingsFromDataClient() {
+        try {
+            Wearable.getDataClient(this).getDataItems(Uri.parse("wear://*/wear_settings"))
+                .addOnSuccessListener { dataItemBuffer ->
+                    try {
+                        dataItemBuffer.firstOrNull()?.let { item ->
+                            val dataMap = DataMapItem.fromDataItem(item).dataMap
+                            val enabled = dataMap.getBoolean("gesture_enabled", isGestureEnabled)
+                            val mode = dataMap.getInt("gesture_mode", gestureActionMode)
+                            val sens = dataMap.getInt("gesture_sensitivity", gestureSensitivity)
+                            Log.d(TAG, "Loaded wear settings from DataClient: enabled=$enabled, mode=$mode, sens=$sens")
+                            applyWearSettings(enabled, mode, sens)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error parsing wear_settings DataItem", e)
+                    } finally {
+                        dataItemBuffer.release()
+                    }
+                }
+                .addOnFailureListener { e ->
+                    Log.w(TAG, "Failed loading wear_settings from DataClient", e)
+                }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error accessing DataClient for wear_settings", e)
         }
     }
 
@@ -421,28 +455,42 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener, Mess
 
     override fun onDataChanged(dataEvents: DataEventBuffer) {
         dataEvents.forEach { event ->
-            if (event.type == DataEvent.TYPE_CHANGED && event.dataItem.uri.path == "/status") {
-                val dataMap = DataMapItem.fromDataItem(event.dataItem).dataMap
-                val newIsEspConnected = dataMap.getBoolean("esp_connected", false)
-                val newIsVehicleOn = dataMap.getBoolean("power_on", false)
-                val newDistance = dataMap.getFloat("distance", -1f)
-                val newRssi = dataMap.getInt("rssi", 0)
-                val newVehicleName = dataMap.getString("vehicle_name", "")
+            if (event.type == DataEvent.TYPE_CHANGED) {
+                val path = event.dataItem.uri.path
+                if (path == "/status") {
+                    val dataMap = DataMapItem.fromDataItem(event.dataItem).dataMap
+                    val newIsEspConnected = dataMap.getBoolean("esp_connected", false)
+                    val newIsVehicleOn = dataMap.getBoolean("power_on", false)
+                    val newDistance = dataMap.getFloat("distance", -1f)
+                    val newRssi = dataMap.getInt("rssi", 0)
+                    val newVehicleName = dataMap.getString("vehicle_name", "")
 
-                isEspConnected = newIsEspConnected
-                isVehicleOn = newIsVehicleOn
-                vehicleDistance = newDistance
-                vehicleRssi = newRssi
-                if (newVehicleName.isNotBlank()) {
-                    vehicleNameOnWatch = newVehicleName
-                }
-                statusText = if (isEspConnected) {
-                    if (isVehicleOn) "XE ĐANG BẬT" else "XE ĐÃ SẴN SÀNG"
-                } else {
-                    "CHƯA KẾT NỐI XE"
-                }
+                    isEspConnected = newIsEspConnected
+                    isVehicleOn = newIsVehicleOn
+                    vehicleDistance = newDistance
+                    vehicleRssi = newRssi
+                    if (newVehicleName.isNotBlank()) {
+                        vehicleNameOnWatch = newVehicleName
+                    }
+                    statusText = if (isEspConnected) {
+                        if (isVehicleOn) "XE ĐANG BẬT" else "XE ĐÃ SẴN SÀNG"
+                    } else {
+                        "CHƯA KẾT NỐI XE"
+                    }
 
-                registerSensorIfNeeded()
+                    registerSensorIfNeeded()
+                } else if (path == "/wear_settings") {
+                    try {
+                        val dataMap = DataMapItem.fromDataItem(event.dataItem).dataMap
+                        val enabled = dataMap.getBoolean("gesture_enabled", isGestureEnabled)
+                        val mode = dataMap.getInt("gesture_mode", gestureActionMode)
+                        val sens = dataMap.getInt("gesture_sensitivity", gestureSensitivity)
+                        Log.d(TAG, "onDataChanged /wear_settings: enabled=$enabled, mode=$mode, sens=$sens")
+                        applyWearSettings(enabled, mode, sens)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error parsing /wear_settings DataItem", e)
+                    }
+                }
             }
         }
     }
