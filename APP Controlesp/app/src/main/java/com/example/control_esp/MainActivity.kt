@@ -264,6 +264,16 @@ class MainActivity : AppCompatActivity() {
     private var intruderCaptureEnabled = true
     private var swIntruderEnableRef: androidx.appcompat.widget.SwitchCompat? = null
     private var crankTimeMs = 1500
+    private var locateBlinkCount = 3
+    private var locateOnTimeMs = 200
+    private var locateOffTimeMs = 150
+    private var activeBlinkDialogRef: android.app.Dialog? = null
+    private var sbBlinkCountRef: SeekBar? = null
+    private var tvBlinkCountValRef: TextView? = null
+    private var sbBlinkOnTimeRef: SeekBar? = null
+    private var tvBlinkOnTimeValRef: TextView? = null
+    private var sbBlinkOffTimeRef: SeekBar? = null
+    private var tvBlinkOffTimeValRef: TextView? = null
 
     // Quản lý tự động kết nối lại khi xe lại gần
     private var isManualDisconnect = false
@@ -633,6 +643,12 @@ class MainActivity : AppCompatActivity() {
         tvDelayValue.text = "${autoStartDelay}s"
         updateDeviceNameDisplay()
 
+        val btPrefs = getSharedPreferences("BT_PREF", MODE_PRIVATE)
+        locateBlinkCount = btPrefs.getInt("LOCATE_BLINK_COUNT", 3).coerceIn(1, 10)
+        locateOnTimeMs = btPrefs.getInt("LOCATE_ON_TIME_MS", 200).coerceIn(100, 1000)
+        locateOffTimeMs = btPrefs.getInt("LOCATE_OFF_TIME_MS", 150).coerceIn(50, 500)
+        updateLocateBlinkUI()
+
         btnScanBle.setOnClickListener {
             withBluetoothPermission { showBleScanDialog() }
         }
@@ -735,6 +751,7 @@ class MainActivity : AppCompatActivity() {
                     // 🛡️ Đồng bộ thời gian thực (RTC) 1 lần duy nhất khi kết nối BLE để lưu vết vân tay lạ
                     val epochSec = System.currentTimeMillis() / 1000
                     sendVehicleCommand("SYNC_TIME|$epochSec")
+                    sendVehicleCommand("GET_LOCATE_CFG")
                 }
             }
         }
@@ -892,6 +909,16 @@ class MainActivity : AppCompatActivity() {
             handleFindVehicle()
         }
 
+        btnFindHero?.setOnLongClickListener {
+            showLocateBlinkSettingsDialog()
+            true
+        }
+
+        val btnConfigLocateBlink = findViewById<View>(R.id.btnConfigLocateBlink)
+        btnConfigLocateBlink?.setOnClickListener {
+            showLocateBlinkSettingsDialog()
+        }
+
         // Long click vào Cài đặt để đổi Secret Key
         bottomNav.findViewById<View>(R.id.nav_settings).setOnLongClickListener {
             if (isConnectedToVehicle()) {
@@ -918,6 +945,21 @@ class MainActivity : AppCompatActivity() {
             AlertDialog.Builder(this)
                 .setTitle("Cảnh báo")
                 .setMessage("Bạn có chắc chắn muốn xóa TOÀN BỘ vân tay trên xe?")
+                .setPositiveButton("Xóa tất cả") { _, _ ->
+                    sendVehicleCommand("FP_CLEAR|CONFIRM")
+                }
+                .setNegativeButton("Hủy", null)
+                .show()
+        }
+
+        val btnClearAllFpDanger = findViewById<View>(R.id.btnClearAllFpDanger)
+        btnClearAllFpDanger?.setOnClickListener {
+            if (!isConnectedToVehicle()) {
+                return@setOnClickListener
+            }
+            AlertDialog.Builder(this)
+                .setTitle("Cảnh báo nguy hiểm")
+                .setMessage("Bạn có chắc chắn muốn xóa TOÀN BỘ vân tay đã lưu trong bộ nhớ xe không?")
                 .setPositiveButton("Xóa tất cả") { _, _ ->
                     sendVehicleCommand("FP_CLEAR|CONFIRM")
                 }
@@ -1046,11 +1088,12 @@ class MainActivity : AppCompatActivity() {
         sendVehicleCommand("3")
         triggerHapticFeedback()
 
-        tvFindBadge?.text = "3 Nhịp Còi & Đèn"
+        tvFindBadge?.text = "$locateBlinkCount Nhịp Còi & Đèn"
         tvFindBadge?.setTextColor(getColor(R.color.accent_amber))
         tvFindDesc?.text = "Đang nháy đèn..."
 
-        animateHazardBlink(1200L)
+        val totalAnimDuration = (locateBlinkCount * (locateOnTimeMs + locateOffTimeMs)).toLong()
+        animateHazardBlink(if (totalAnimDuration > 500L) totalAnimDuration else 1200L)
     }
 
     private fun handleVehicleFeedback(status: String) {
@@ -1367,6 +1410,25 @@ class MainActivity : AppCompatActivity() {
                     crankTimeMs = t.coerceIn(200, 5000)
                     getSharedPreferences("BT_PREF", MODE_PRIVATE).edit().putInt("CRANK_TIME_MS", crankTimeMs).apply()
                 }
+                msg.startsWith("LOCATE_CFG|") -> {
+                    val parts = msg.split("|")
+                    if (parts.size >= 4) {
+                        locateBlinkCount = parts[1].toIntOrNull()?.coerceIn(1, 10) ?: 3
+                        locateOnTimeMs = parts[2].toIntOrNull()?.coerceIn(100, 1000) ?: 200
+                        locateOffTimeMs = parts[3].toIntOrNull()?.coerceIn(50, 500) ?: 150
+
+                        getSharedPreferences("BT_PREF", MODE_PRIVATE).edit()
+                            .putInt("LOCATE_BLINK_COUNT", locateBlinkCount)
+                            .putInt("LOCATE_ON_TIME_MS", locateOnTimeMs)
+                            .putInt("LOCATE_OFF_TIME_MS", locateOffTimeMs)
+                            .apply()
+
+                        updateLocateBlinkUI()
+                    }
+                }
+                msg == "DA_SET_LOCATE_CFG" -> {
+                    Toast.makeText(this, "✅ Đã lưu cấu hình xi-nhan thành công!", Toast.LENGTH_SHORT).show()
+                }
                 msg == "NO_INTRUDER_LOGS" -> {
                     pbIntruderLoadingRef?.visibility = View.GONE
                     intruderLogList.clear()
@@ -1432,8 +1494,9 @@ class MainActivity : AppCompatActivity() {
                     UnlockHistoryManager.addEvent(this, "Đề nổ máy xe", UnlockHistoryManager.TYPE_ENGINE_START, "Khởi động động cơ thành công")
                 }
                 status == "DA_TIM_XE" -> {
-                    animateHazardBlink(1200L)
-                    UnlockHistoryManager.addEvent(this, "Tìm xe trong bãi", UnlockHistoryManager.TYPE_LOCATE, "Nháy xi-nhan và còi 3 nhịp")
+                    val totalAnimDuration = (locateBlinkCount * (locateOnTimeMs + locateOffTimeMs)).toLong()
+                    animateHazardBlink(if (totalAnimDuration > 500L) totalAnimDuration else 1200L)
+                    UnlockHistoryManager.addEvent(this, "Tìm xe trong bãi", UnlockHistoryManager.TYPE_LOCATE, "Nháy xi-nhan và còi $locateBlinkCount nhịp")
                 }
                 status == "DA_DOI_KEY" -> {
                     // Thành công
@@ -1474,7 +1537,9 @@ class MainActivity : AppCompatActivity() {
                     if (parts.size >= 3) {
                         val id = parts[1].toIntOrNull() ?: 0
                         val name = parts[2]
+                        fingerprintList.removeAll { it.id == id }
                         fingerprintList.add(FingerprintItem(id, name))
+                        fingerprintList.sortBy { it.id }
                     }
                 }
                 status == "FP_LIST_END" -> {
@@ -4328,6 +4393,145 @@ class MainActivity : AppCompatActivity() {
 
         dialog.show()
         sendVehicleCommand("GET_CRANK_TIME")
+    }
+
+    private fun updateLocateBlinkUI() {
+        tvFindBadge?.text = "$locateBlinkCount Nhịp Còi & Đèn"
+        if (activeBlinkDialogRef?.isShowing == true) {
+            sbBlinkCountRef?.progress = (locateBlinkCount - 1).coerceIn(0, 9)
+            tvBlinkCountValRef?.text = "$locateBlinkCount lần"
+
+            sbBlinkOnTimeRef?.progress = ((locateOnTimeMs - 100) / 50).coerceIn(0, 18)
+            tvBlinkOnTimeValRef?.text = "$locateOnTimeMs ms"
+
+            sbBlinkOffTimeRef?.progress = ((locateOffTimeMs - 50) / 50).coerceIn(0, 9)
+            tvBlinkOffTimeValRef?.text = "$locateOffTimeMs ms"
+        }
+    }
+
+    private fun showLocateBlinkSettingsDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_blink_settings, null)
+        val dialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .create()
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+        val btnClose = dialogView.findViewById<ImageButton>(R.id.btnCloseBlinkDialog)
+        val tvBlinkCountVal = dialogView.findViewById<TextView>(R.id.tvBlinkCountVal)
+        val sbBlinkCount = dialogView.findViewById<SeekBar>(R.id.sbBlinkCount)
+
+        val tvBlinkOnTimeVal = dialogView.findViewById<TextView>(R.id.tvBlinkOnTimeVal)
+        val sbBlinkOnTime = dialogView.findViewById<SeekBar>(R.id.sbBlinkOnTime)
+
+        val tvBlinkOffTimeVal = dialogView.findViewById<TextView>(R.id.tvBlinkOffTimeVal)
+        val sbBlinkOffTime = dialogView.findViewById<SeekBar>(R.id.sbBlinkOffTime)
+
+        val btnTest = dialogView.findViewById<androidx.appcompat.widget.AppCompatButton>(R.id.btnTestLocateBlink)
+        val btnSave = dialogView.findViewById<androidx.appcompat.widget.AppCompatButton>(R.id.btnSaveLocateBlink)
+
+        var currentCount = locateBlinkCount.coerceIn(1, 10)
+        var currentOnMs = locateOnTimeMs.coerceIn(100, 1000)
+        var currentOffMs = locateOffTimeMs.coerceIn(50, 500)
+
+        // Bind global refs for real-time sync if BLE receives update
+        sbBlinkCountRef = sbBlinkCount
+        tvBlinkCountValRef = tvBlinkCountVal
+        sbBlinkOnTimeRef = sbBlinkOnTime
+        tvBlinkOnTimeValRef = tvBlinkOnTimeVal
+        sbBlinkOffTimeRef = sbBlinkOffTime
+        tvBlinkOffTimeValRef = tvBlinkOffTimeVal
+        activeBlinkDialogRef = dialog
+
+        // 1. Số lần nháy (1 - 10)
+        sbBlinkCount?.progress = currentCount - 1
+        tvBlinkCountVal?.text = "$currentCount lần"
+        sbBlinkCount?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(p0: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    currentCount = progress + 1
+                    tvBlinkCountVal?.text = "$currentCount lần"
+                }
+            }
+            override fun onStartTrackingTouch(p0: SeekBar?) {}
+            override fun onStopTrackingTouch(p0: SeekBar?) {}
+        })
+
+        // 2. Thời gian sáng (100 - 1000ms, bước 50ms)
+        sbBlinkOnTime?.progress = ((currentOnMs - 100) / 50).coerceIn(0, 18)
+        tvBlinkOnTimeVal?.text = "$currentOnMs ms"
+        sbBlinkOnTime?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(p0: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    currentOnMs = 100 + progress * 50
+                    tvBlinkOnTimeVal?.text = "$currentOnMs ms"
+                }
+            }
+            override fun onStartTrackingTouch(p0: SeekBar?) {}
+            override fun onStopTrackingTouch(p0: SeekBar?) {}
+        })
+
+        // 3. Thời gian nghỉ (50 - 500ms, bước 50ms)
+        sbBlinkOffTime?.progress = ((currentOffMs - 50) / 50).coerceIn(0, 9)
+        tvBlinkOffTimeVal?.text = "$currentOffMs ms"
+        sbBlinkOffTime?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(p0: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    currentOffMs = 50 + progress * 50
+                    tvBlinkOffTimeVal?.text = "$currentOffMs ms"
+                }
+            }
+            override fun onStartTrackingTouch(p0: SeekBar?) {}
+            override fun onStopTrackingTouch(p0: SeekBar?) {}
+        })
+
+        btnTest?.setOnClickListener {
+            if (!isConnectedToVehicle()) {
+                Toast.makeText(this, "Chưa kết nối xe để phát thử!", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            sendVehicleCommand("SET_LOCATE_CFG|$currentCount|$currentOnMs|$currentOffMs")
+            handler.postDelayed({
+                sendVehicleCommand("3")
+            }, 120)
+            Toast.makeText(this, "🔔 Đang phát thử: $currentCount lần ($currentOnMs ms / $currentOffMs ms)", Toast.LENGTH_SHORT).show()
+        }
+
+        btnSave?.setOnClickListener {
+            locateBlinkCount = currentCount
+            locateOnTimeMs = currentOnMs
+            locateOffTimeMs = currentOffMs
+
+            getSharedPreferences("BT_PREF", MODE_PRIVATE).edit()
+                .putInt("LOCATE_BLINK_COUNT", locateBlinkCount)
+                .putInt("LOCATE_ON_TIME_MS", locateOnTimeMs)
+                .putInt("LOCATE_OFF_TIME_MS", locateOffTimeMs)
+                .apply()
+
+            updateLocateBlinkUI()
+
+            if (isConnectedToVehicle()) {
+                sendVehicleCommand("SET_LOCATE_CFG|$locateBlinkCount|$locateOnTimeMs|$locateOffTimeMs")
+            }
+            Toast.makeText(this, "✅ Đã lưu cài đặt nháy xi-nhan: $locateBlinkCount lần ($locateOnTimeMs ms / $locateOffTimeMs ms)", Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
+        }
+
+        btnClose?.setOnClickListener { dialog.dismiss() }
+
+        dialog.setOnDismissListener {
+            sbBlinkCountRef = null
+            tvBlinkCountValRef = null
+            sbBlinkOnTimeRef = null
+            tvBlinkOnTimeValRef = null
+            sbBlinkOffTimeRef = null
+            tvBlinkOffTimeValRef = null
+            activeBlinkDialogRef = null
+        }
+
+        dialog.show()
+        if (isConnectedToVehicle()) {
+            sendVehicleCommand("GET_LOCATE_CFG")
+        }
     }
 
     private fun invertBitmap(src: Bitmap): Bitmap {

@@ -20,6 +20,9 @@ bool hasSyncedTime = false;         // Cờ đã đồng bộ giờ thực từ 
 const int MAX_INTRUDER_PHOTOS = 10; // Giới hạn lưu tối đa 10 ảnh vân tay kẻ gian (FIFO)
 bool intruderCaptureEnabled = true; // Bật/Tắt tính năng tự động trích xuất & lưu ảnh kẻ gian vào LittleFS
 int crankTimeMs = 1500;             // Thời gian giữ đề xe (ms), dải từ 200ms đến 5000ms
+int locateBlinkCount = 3;           // Số lần nháy xi-nhan khi tìm xe (mặc định 3 lần, từ 1 đến 10)
+int locateOnTimeMs = 200;           // Thời gian sáng đèn/kêu còi (ms, mặc định 200ms, từ 100ms đến 1000ms)
+int locateOffTimeMs = 150;          // Thời gian ngắt giữa các nhịp nháy (ms, mặc định 150ms, từ 50ms đến 500ms)
 
 // 🚀 QUẢN LÝ PHIÊN BẢN & CẬP NHẬT OTA TỪ XA
 // ==========================================
@@ -889,20 +892,21 @@ void triggerStarter()
     notifyStatus("DA_DE_MAY");
 }
 
-// Tìm xe: Nháy xi-nhan + còi 3 nhịp ngắn chuẩn xe cao cấp (RELAY3_PIN: Active LOW)
+// Tìm xe: Nháy xi-nhan + còi theo cấu hình (RELAY3_PIN: Active LOW)
 void triggerLocate()
 {
     lastActivityTime = millis();
-    Serial.println("Đang phát tín hiệu tìm xe (3 nhịp bíp & nháy đèn)...");
-    for (int i = 0; i < 3; i++)
+    Serial.printf("Đang phát tín hiệu tìm xe (%d nhịp bíp & nháy đèn, bật %dms, ngắt %dms)...\n",
+                  locateBlinkCount, locateOnTimeMs, locateOffTimeMs);
+    for (int i = 0; i < locateBlinkCount; i++)
     {
         digitalWrite(RELAY3_PIN, LOW); // Active LOW: Bật còi/đèn
         digitalWrite(ONBOARD_LED_PIN, LOW);
-        delay(200);
+        delay(locateOnTimeMs);
         digitalWrite(RELAY3_PIN, HIGH); // Tắt còi/đèn
         digitalWrite(ONBOARD_LED_PIN, HIGH);
-        if (i < 2)
-            delay(150);
+        if (i < locateBlinkCount - 1)
+            delay(locateOffTimeMs);
     }
     notifyStatus("DA_TIM_XE");
 }
@@ -3151,6 +3155,35 @@ void processIncomingCommand(String data)
         Serial.printf("⚡ [CONFIG] Cài đặt thời gian đề xe: %d ms\n", crankTimeMs);
         notifyStatus("FB|CRANK_TIME|" + String(crankTimeMs));
     }
+    else if (cmd == "GET_LOCATE_CFG")
+    {
+        notifyStatus("FB|LOCATE_CFG|" + String(locateBlinkCount) + "|" + String(locateOnTimeMs) + "|" + String(locateOffTimeMs));
+    }
+    else if (cmd == "SET_LOCATE_CFG" && params.length() > 0)
+    {
+        // Gói tin: <KEY>|SET_LOCATE_CFG|<count>|<onMs>|<offMs>
+        int p1 = params.indexOf('|');
+        int p2 = params.indexOf('|', p1 + 1);
+        if (p1 != -1 && p2 != -1)
+        {
+            int cnt = params.substring(0, p1).toInt();
+            int onMs = params.substring(p1 + 1, p2).toInt();
+            int offMs = params.substring(p2 + 1).toInt();
+
+            locateBlinkCount = constrain(cnt, 1, 10);
+            locateOnTimeMs = constrain(onMs, 100, 1000);
+            locateOffTimeMs = constrain(offMs, 50, 500);
+
+            prefsSecurity.putInt("loc_cnt", locateBlinkCount);
+            prefsSecurity.putInt("loc_on", locateOnTimeMs);
+            prefsSecurity.putInt("loc_off", locateOffTimeMs);
+
+            Serial.printf("💡 [CONFIG] Đã lưu cấu hình nháy xi-nhan: %d lần, Bật: %d ms, Ngắt: %d ms\n",
+                          locateBlinkCount, locateOnTimeMs, locateOffTimeMs);
+            notifyStatus("DA_SET_LOCATE_CFG");
+            notifyStatus("FB|LOCATE_CFG|" + String(locateBlinkCount) + "|" + String(locateOnTimeMs) + "|" + String(locateOffTimeMs));
+        }
+    }
     // --- CÁC LỆNH TINH CHỈNH CẢM BIẾN VÂN TAY ---
     else if (cmd == "GET_FP_CFG")
     {
@@ -3938,6 +3971,15 @@ void setup()
     // Tải thời gian đề xe
     crankTimeMs = prefsSecurity.getInt("crank_ms", 1500);
     Serial.printf("⚡ Thời gian đề nổ (Crank Time): %d ms\n", crankTimeMs);
+
+    // Tải cấu hình nháy xi-nhan tìm xe
+    locateBlinkCount = prefsSecurity.getInt("loc_cnt", 3);
+    locateOnTimeMs = prefsSecurity.getInt("loc_on", 200);
+    locateOffTimeMs = prefsSecurity.getInt("loc_off", 150);
+    if (locateBlinkCount < 1 || locateBlinkCount > 10) locateBlinkCount = 3;
+    if (locateOnTimeMs < 100 || locateOnTimeMs > 1000) locateOnTimeMs = 200;
+    if (locateOffTimeMs < 50 || locateOffTimeMs > 500) locateOffTimeMs = 150;
+    Serial.printf("💡 Cấu hình nháy xi-nhan: %d lần, Bật: %d ms, Ngắt: %d ms\n", locateBlinkCount, locateOnTimeMs, locateOffTimeMs);
 
     // KHÔI PHỤC NGAY LẬP TỨC TRẠNG THÁI RELAY KHI KHỞI ĐỘNG (FAIL-SAFE)
     digitalWrite(RELAY1_PIN, isUnlocked ? HIGH : LOW);

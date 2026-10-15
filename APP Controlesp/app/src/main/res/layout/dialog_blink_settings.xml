@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/card_cyber_bg"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <!-- Header: Icon & Title -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_marginBottom="16dp">
+
+        <FrameLayout
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/avatar_fp_bg">
+
+            <ImageView
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_gravity="center"
+                android:src="@drawable/ic_auto"
+                app:tint="@color/accent_amber" />
+        </FrameLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="CÀI ĐẶT NHÁY XI-NHAN TÌM XE"
+                android:textColor="@color/accent_amber"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.04" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Tùy chỉnh số nhịp và thời gian sáng/ngắt đèn còi (Relay 3)"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <ImageButton
+            android:id="@+id/btnCloseBlinkDialog"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_delete"
+            app:tint="@color/text_secondary"
+            android:contentDescription="Đóng" />
+    </LinearLayout>
+
+    <!-- 1. Cấu hình Số lần nháy -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_marginBottom="4dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Số nhịp nháy:"
+            android:textColor="@color/white"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvBlinkCountVal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="3 lần"
+            android:textColor="@color/accent_amber"
+            android:textSize="13sp"
+            android:fontFamily="monospace"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <SeekBar
+        android:id="@+id/sbBlinkCount"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="9"
+        android:progress="2"
+        android:progressTint="@color/accent_amber"
+        android:thumbTint="@color/accent_amber"
+        android:layout_marginBottom="14dp" />
+
+    <!-- 2. Cấu hình Thời gian sáng (On Time ms) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_marginBottom="4dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Thời gian sáng đèn (On):"
+            android:textColor="@color/white"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvBlinkOnTimeVal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="200 ms"
+            android:textColor="@color/accent_cyan"
+            android:textSize="13sp"
+            android:fontFamily="monospace"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <SeekBar
+        android:id="@+id/sbBlinkOnTime"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="18"
+        android:progress="2"
+        android:progressTint="@color/accent_cyan"
+        android:thumbTint="@color/accent_cyan"
+        android:layout_marginBottom="14dp" />
+
+    <!-- 3. Cấu hình Thời gian ngắt (Off Time ms) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:layout_marginBottom="4dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Thời gian nghỉ giữa nhịp (Off):"
+            android:textColor="@color/white"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvBlinkOffTimeVal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="150 ms"
+            android:textColor="@color/accent_cyan"
+            android:textSize="13sp"
+            android:fontFamily="monospace"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <SeekBar
+        android:id="@+id/sbBlinkOffTime"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="9"
+        android:progress="2"
+        android:progressTint="@color/accent_cyan"
+        android:thumbTint="@color/accent_cyan"
+        android:layout_marginBottom="14dp" />
+
+    <!-- Nút bấm Thử nghiệm & Nút Lưu -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="6dp">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnTestLocateBlink"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/header_icon_btn_bg"
+            android:text="🔔 Thử Ngay"
+            android:textAllCaps="false"
+            android:textColor="@color/accent_amber"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnSaveLocateBlink"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/button_background"
+            android:text="💾 Lưu Cài Đặt"
+            android:textAllCaps="false"
+            android:textColor="@color/white"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+</LinearLayout>

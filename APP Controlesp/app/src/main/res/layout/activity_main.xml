@@ -470,12 +470,23 @@
 
                             <TextView
                                 android:id="@+id/tvFindBadge"
-                                android:layout_width="wrap_content"
+                                android:layout_width="0dp"
                                 android:layout_height="wrap_content"
+                                android:layout_weight="1"
                                 android:layout_marginStart="8dp"
                                 android:text="Relay 3"
                                 android:textColor="@color/text_muted"
                                 android:textSize="10sp" />
+
+                            <ImageView
+                                android:id="@+id/btnConfigLocateBlink"
+                                android:layout_width="24dp"
+                                android:layout_height="24dp"
+                                android:src="@drawable/ic_settings"
+                                app:tint="@color/text_secondary"
+                                android:background="?attr/selectableItemBackgroundBorderless"
+                                android:padding="3dp"
+                                android:contentDescription="Cài đặt nháy xi-nhan" />
                         </LinearLayout>
 
                         <TextView
@@ -1940,7 +1951,7 @@
                         android:layout_marginBottom="8dp" />
 
                     <androidx.appcompat.widget.AppCompatButton
-                        android:id="@+id/btnClearAllFp"
+                        android:id="@+id/btnClearAllFpDanger"
                         android:layout_width="match_parent"
                         android:layout_height="44dp"
                         android:background="@drawable/card_danger_bg"
