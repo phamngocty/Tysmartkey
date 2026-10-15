@@ -274,6 +274,7 @@ class MainActivity : AppCompatActivity() {
     private var tvBlinkOnTimeValRef: TextView? = null
     private var sbBlinkOffTimeRef: SeekBar? = null
     private var tvBlinkOffTimeValRef: TextView? = null
+    private var needSyncLocateCfgToVehicle = false
 
     // Quản lý tự động kết nối lại khi xe lại gần
     private var isManualDisconnect = false
@@ -751,7 +752,16 @@ class MainActivity : AppCompatActivity() {
                     // 🛡️ Đồng bộ thời gian thực (RTC) 1 lần duy nhất khi kết nối BLE để lưu vết vân tay lạ
                     val epochSec = System.currentTimeMillis() / 1000
                     sendVehicleCommand("SYNC_TIME|$epochSec")
-                    sendVehicleCommand("GET_LOCATE_CFG")
+                    if (needSyncLocateCfgToVehicle) {
+                        handler.postDelayed({
+                            sendVehicleCommand("SET_LOCATE_CFG|$locateBlinkCount|$locateOnTimeMs|$locateOffTimeMs")
+                            needSyncLocateCfgToVehicle = false
+                        }, 300)
+                    } else {
+                        handler.postDelayed({
+                            sendVehicleCommand("GET_LOCATE_CFG")
+                        }, 300)
+                    }
                 }
             }
         }
@@ -4489,10 +4499,7 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, "Chưa kết nối xe để phát thử!", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            sendVehicleCommand("SET_LOCATE_CFG|$currentCount|$currentOnMs|$currentOffMs")
-            handler.postDelayed({
-                sendVehicleCommand("3")
-            }, 120)
+            sendVehicleCommand("TEST_LOCATE_CFG|$currentCount|$currentOnMs|$currentOffMs")
             Toast.makeText(this, "🔔 Đang phát thử: $currentCount lần ($currentOnMs ms / $currentOffMs ms)", Toast.LENGTH_SHORT).show()
         }
 
@@ -4511,8 +4518,11 @@ class MainActivity : AppCompatActivity() {
 
             if (isConnectedToVehicle()) {
                 sendVehicleCommand("SET_LOCATE_CFG|$locateBlinkCount|$locateOnTimeMs|$locateOffTimeMs")
+                Toast.makeText(this, "✅ Đã gửi cài đặt sang xe! Xe sẽ nháy xi-nhan để xác nhận.", Toast.LENGTH_SHORT).show()
+            } else {
+                needSyncLocateCfgToVehicle = true
+                Toast.makeText(this, "⚠️ Đã lưu trên máy. Sẽ tự động nạp sang xe ngay khi kết nối!", Toast.LENGTH_LONG).show()
             }
-            Toast.makeText(this, "✅ Đã lưu cài đặt nháy xi-nhan: $locateBlinkCount lần ($locateOnTimeMs ms / $locateOffTimeMs ms)", Toast.LENGTH_SHORT).show()
             dialog.dismiss()
         }
 

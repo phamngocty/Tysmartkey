@@ -3159,6 +3159,35 @@ void processIncomingCommand(String data)
     {
         notifyStatus("FB|LOCATE_CFG|" + String(locateBlinkCount) + "|" + String(locateOnTimeMs) + "|" + String(locateOffTimeMs));
     }
+    else if (cmd == "TEST_LOCATE_CFG" && params.length() > 0)
+    {
+        // Gói tin: <KEY>|TEST_LOCATE_CFG|<count>|<onMs>|<offMs>
+        int p1 = params.indexOf('|');
+        int p2 = params.indexOf('|', p1 + 1);
+        if (p1 != -1 && p2 != -1)
+        {
+            int cnt = params.substring(0, p1).toInt();
+            int onMs = params.substring(p1 + 1, p2).toInt();
+            int offMs = params.substring(p2 + 1).toInt();
+
+            int prevCnt = locateBlinkCount;
+            int prevOn = locateOnTimeMs;
+            int prevOff = locateOffTimeMs;
+
+            locateBlinkCount = constrain(cnt, 1, 10);
+            locateOnTimeMs = constrain(onMs, 100, 1000);
+            locateOffTimeMs = constrain(offMs, 50, 500);
+
+            Serial.printf("🔔 [TEST] Thử nghiệm nháy xi-nhan: %d lần, Bật: %d ms, Ngắt: %d ms\n",
+                          locateBlinkCount, locateOnTimeMs, locateOffTimeMs);
+            triggerLocate();
+
+            // Khôi phục lại cấu hình đã lưu
+            locateBlinkCount = prevCnt;
+            locateOnTimeMs = prevOn;
+            locateOffTimeMs = prevOff;
+        }
+    }
     else if (cmd == "SET_LOCATE_CFG" && params.length() > 0)
     {
         // Gói tin: <KEY>|SET_LOCATE_CFG|<count>|<onMs>|<offMs>
@@ -3182,6 +3211,9 @@ void processIncomingCommand(String data)
                           locateBlinkCount, locateOnTimeMs, locateOffTimeMs);
             notifyStatus("DA_SET_LOCATE_CFG");
             notifyStatus("FB|LOCATE_CFG|" + String(locateBlinkCount) + "|" + String(locateOnTimeMs) + "|" + String(locateOffTimeMs));
+
+            // Kích hoạt nháy đèn/còi ngay lập tức để người dùng xác nhận cấu hình mới đã hoạt động!
+            triggerLocate();
         }
     }
     // --- CÁC LỆNH TINH CHỈNH CẢM BIẾN VÂN TAY ---
