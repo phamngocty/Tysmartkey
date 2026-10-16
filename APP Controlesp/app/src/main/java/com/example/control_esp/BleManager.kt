@@ -6,6 +6,8 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.content.Context
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
@@ -136,6 +138,71 @@ object BleManager {
             } catch (e: Exception) {
                 Log.e(TAG, "Error stopping scan", e)
             }
+        }
+    }
+
+    /**
+     * Tự động kết nối thông minh với hỗ trợ Quét (Scan-Assisted Connect):
+     * Khởi động scan BLE ngắn (tối đa timeoutMs). Nếu quét thấy thiết bị có MAC tương ứng:
+     * Dừng scan và kết nối ngay qua BluetoothDevice thực tế vừa scan được, giúp hệ điều hành
+     * Android cập nhật cache tần số và tránh lỗi GATT 133 khi xe đang ở chế độ chờ/quảng bá tiết kiệm.
+     */
+    fun connectWithScan(
+        context: Context,
+        macAddress: String,
+        preferredName: String? = null,
+        timeoutMs: Long = 3500L,
+        onResult: (Boolean) -> Unit
+    ) {
+        val scanner = bluetoothAdapter?.bluetoothLeScanner
+        if (scanner == null) {
+            connect(context, macAddress, preferredName, onResult)
+            return
+        }
+
+        var isConnectedOrConnecting = false
+        var scanCallback: ScanCallback? = null
+        val handler = Handler(Looper.getMainLooper())
+
+        val timeoutRunnable = Runnable {
+            if (!isConnectedOrConnecting) {
+                isConnectedOrConnecting = true
+                stopScan(scanCallback)
+                Log.d(TAG, "Scan timeout, fallback to direct connect for $macAddress")
+                connect(context, macAddress, preferredName, onResult)
+            }
+        }
+
+        scanCallback = object : ScanCallback() {
+            override fun onScanResult(callbackType: Int, result: ScanResult?) {
+                val dev = result?.device ?: return
+                if (dev.address.equals(macAddress, ignoreCase = true)) {
+                    if (!isConnectedOrConnecting) {
+                        isConnectedOrConnecting = true
+                        handler.removeCallbacks(timeoutRunnable)
+                        stopScan(this)
+                        Log.i(TAG, "Found target device ${dev.address} during scan! Connecting immediately...")
+                        connect(context, macAddress, preferredName ?: dev.name, onResult)
+                    }
+                }
+            }
+
+            override fun onScanFailed(errorCode: Int) {
+                if (!isConnectedOrConnecting) {
+                    isConnectedOrConnecting = true
+                    handler.removeCallbacks(timeoutRunnable)
+                    connect(context, macAddress, preferredName, onResult)
+                }
+            }
+        }
+
+        try {
+            handler.postDelayed(timeoutRunnable, timeoutMs)
+            scanner.startScan(scanCallback)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start assisted scan", e)
+            handler.removeCallbacks(timeoutRunnable)
+            connect(context, macAddress, preferredName, onResult)
         }
     }
 

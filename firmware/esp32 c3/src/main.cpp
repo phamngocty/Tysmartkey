@@ -184,6 +184,10 @@ void beep(int count, int delayMs = 100)
 // Gửi phản hồi trạng thái qua BLE & Serial
 void notifyStatus(String msg)
 {
+    while (msg.startsWith("FB|"))
+    {
+        msg = msg.substring(3);
+    }
     String fullMsg = "FB|" + msg + "\n";
     if (!msg.startsWith("FP_IMG_CHUNK|"))
     {
@@ -892,23 +896,24 @@ void triggerStarter()
     notifyStatus("DA_DE_MAY");
 }
 
+// Cờ yêu cầu nháy xi-nhan tìm xe phi khóa (Non-blocking cho NimBLE stack)
+volatile bool flagLocateRequested = false;
+volatile int locateReqCount = 0;
+volatile int locateReqOnMs = 0;
+volatile int locateReqOffMs = 0;
+
+void requestLocateBlink(int count = 0, int onMs = 0, int offMs = 0)
+{
+    locateReqCount = count;
+    locateReqOnMs = onMs;
+    locateReqOffMs = offMs;
+    flagLocateRequested = true;
+}
+
 // Tìm xe: Nháy xi-nhan + còi theo cấu hình (RELAY3_PIN: Active LOW)
 void triggerLocate()
 {
-    lastActivityTime = millis();
-    Serial.printf("Đang phát tín hiệu tìm xe (%d nhịp bíp & nháy đèn, bật %dms, ngắt %dms)...\n",
-                  locateBlinkCount, locateOnTimeMs, locateOffTimeMs);
-    for (int i = 0; i < locateBlinkCount; i++)
-    {
-        digitalWrite(RELAY3_PIN, LOW); // Active LOW: Bật còi/đèn
-        digitalWrite(ONBOARD_LED_PIN, LOW);
-        delay(locateOnTimeMs);
-        digitalWrite(RELAY3_PIN, HIGH); // Tắt còi/đèn
-        digitalWrite(ONBOARD_LED_PIN, HIGH);
-        if (i < locateBlinkCount - 1)
-            delay(locateOffTimeMs);
-    }
-    notifyStatus("DA_TIM_XE");
+    requestLocateBlink();
 }
 
 // ==========================================
@@ -3153,11 +3158,11 @@ void processIncomingCommand(String data)
         crankTimeMs = constrain(t, 200, 5000);
         prefsSecurity.putInt("crank_ms", crankTimeMs);
         Serial.printf("⚡ [CONFIG] Cài đặt thời gian đề xe: %d ms\n", crankTimeMs);
-        notifyStatus("FB|CRANK_TIME|" + String(crankTimeMs));
+        notifyStatus("CRANK_TIME|" + String(crankTimeMs));
     }
     else if (cmd == "GET_LOCATE_CFG")
     {
-        notifyStatus("FB|LOCATE_CFG|" + String(locateBlinkCount) + "|" + String(locateOnTimeMs) + "|" + String(locateOffTimeMs));
+        notifyStatus("LOCATE_CFG|" + String(locateBlinkCount) + "|" + String(locateOnTimeMs) + "|" + String(locateOffTimeMs));
     }
     else if (cmd == "TEST_LOCATE_CFG" && params.length() > 0)
     {
@@ -3166,26 +3171,13 @@ void processIncomingCommand(String data)
         int p2 = params.indexOf('|', p1 + 1);
         if (p1 != -1 && p2 != -1)
         {
-            int cnt = params.substring(0, p1).toInt();
-            int onMs = params.substring(p1 + 1, p2).toInt();
-            int offMs = params.substring(p2 + 1).toInt();
-
-            int prevCnt = locateBlinkCount;
-            int prevOn = locateOnTimeMs;
-            int prevOff = locateOffTimeMs;
-
-            locateBlinkCount = constrain(cnt, 1, 10);
-            locateOnTimeMs = constrain(onMs, 100, 1000);
-            locateOffTimeMs = constrain(offMs, 50, 500);
+            int testCnt = constrain(params.substring(0, p1).toInt(), 1, 10);
+            int testOnMs = constrain(params.substring(p1 + 1, p2).toInt(), 100, 1000);
+            int testOffMs = constrain(params.substring(p2 + 1).toInt(), 50, 500);
 
             Serial.printf("🔔 [TEST] Thử nghiệm nháy xi-nhan: %d lần, Bật: %d ms, Ngắt: %d ms\n",
-                          locateBlinkCount, locateOnTimeMs, locateOffTimeMs);
-            triggerLocate();
-
-            // Khôi phục lại cấu hình đã lưu
-            locateBlinkCount = prevCnt;
-            locateOnTimeMs = prevOn;
-            locateOffTimeMs = prevOff;
+                          testCnt, testOnMs, testOffMs);
+            requestLocateBlink(testCnt, testOnMs, testOffMs);
         }
     }
     else if (cmd == "SET_LOCATE_CFG" && params.length() > 0)
@@ -3210,10 +3202,10 @@ void processIncomingCommand(String data)
             Serial.printf("💡 [CONFIG] Đã lưu cấu hình nháy xi-nhan: %d lần, Bật: %d ms, Ngắt: %d ms\n",
                           locateBlinkCount, locateOnTimeMs, locateOffTimeMs);
             notifyStatus("DA_SET_LOCATE_CFG");
-            notifyStatus("FB|LOCATE_CFG|" + String(locateBlinkCount) + "|" + String(locateOnTimeMs) + "|" + String(locateOffTimeMs));
+            notifyStatus("LOCATE_CFG|" + String(locateBlinkCount) + "|" + String(locateOnTimeMs) + "|" + String(locateOffTimeMs));
 
-            // Kích hoạt nháy đèn/còi ngay lập tức để người dùng xác nhận cấu hình mới đã hoạt động!
-            triggerLocate();
+            // Kích hoạt nháy đèn/còi (non-blocking) để người dùng xác nhận cấu hình mới đã hoạt động!
+            requestLocateBlink(locateBlinkCount, locateOnTimeMs, locateOffTimeMs);
         }
     }
     // --- CÁC LỆNH TINH CHỈNH CẢM BIẾN VÂN TAY ---
@@ -4254,6 +4246,32 @@ void loop()
             lastActivityTime = millis();
             handleVibrationDetected();
         }
+    }
+
+    // -------------------------------------------------------------
+    // 💡 XỬ LÝ NHÁY XI-NHAN TÌM XE HOẶC TEST CẤU HÌNH (NON-BLOCKING CHO BLE STACK)
+    // -------------------------------------------------------------
+    if (flagLocateRequested)
+    {
+        flagLocateRequested = false;
+        int count = (locateReqCount > 0) ? locateReqCount : locateBlinkCount;
+        int onMs = (locateReqOnMs > 0) ? locateReqOnMs : locateOnTimeMs;
+        int offMs = (locateReqOffMs > 0) ? locateReqOffMs : locateOffTimeMs;
+
+        lastActivityTime = millis();
+        Serial.printf("💡 [LOCATE] Đang thực thi nháy xi-nhan (%d nhịp, bật %dms, ngắt %dms)...\n",
+                      count, onMs, offMs);
+        for (int i = 0; i < count; i++)
+        {
+            digitalWrite(RELAY3_PIN, LOW); // Active LOW: Bật còi/đèn
+            digitalWrite(ONBOARD_LED_PIN, LOW);
+            delay(onMs);
+            digitalWrite(RELAY3_PIN, HIGH); // Tắt còi/đèn
+            digitalWrite(ONBOARD_LED_PIN, HIGH);
+            if (i < count - 1)
+                delay(offMs);
+        }
+        notifyStatus("DA_TIM_XE");
     }
 
     // -------------------------------------------------------------

@@ -275,6 +275,7 @@ class MainActivity : AppCompatActivity() {
     private var sbBlinkOffTimeRef: SeekBar? = null
     private var tvBlinkOffTimeValRef: TextView? = null
     private var needSyncLocateCfgToVehicle = false
+    private var isUserInteractingWithBlinkDialog = false
 
     // Quản lý tự động kết nối lại khi xe lại gần
     private var isManualDisconnect = false
@@ -1349,7 +1350,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         runOnUiThread {
-            val msg = if (status.startsWith("FB|")) status.substringAfter("FB|") else status
+            var msg = status
+            while (msg.startsWith("FB|")) {
+                msg = msg.substring(3).trim()
+            }
             when {
                 // 🛡️ XỬ LÝ NHẬT KÝ BẮT QUẢ TANG VÂN TAY LẠ (INTRUDER AUDIT)
                 msg.startsWith("INTRUDER_COUNT|") -> {
@@ -3786,7 +3790,7 @@ class MainActivity : AppCompatActivity() {
         isConnecting = true
         if (isBleMode) {
             val mac = BleManager.activeMac ?: return
-            BleManager.connect(this, mac) { success ->
+            BleManager.connectWithScan(this, mac) { success ->
                 runOnUiThread {
                     isConnecting = false
                     updateConnectionUI(success)
@@ -4142,6 +4146,13 @@ class MainActivity : AppCompatActivity() {
         WatchSyncHelper.checkWatchConnection(this) { isConn, name ->
             updateWatchStatusUI(isConn, name)
         }
+        if (isAutoConnectEnabled && !isConnectedToVehicle() && !isManualDisconnect) {
+            val currentMac = if (isBleMode) BleManager.activeMac else BluetoothController.deviceMac
+            if (currentMac != null) {
+                handler.removeCallbacks(reconnectRunnable)
+                handler.postDelayed(reconnectRunnable, 800)
+            }
+        }
     }
 
     private fun updateWatchStatusUI(isConnected: Boolean, deviceName: String?) {
@@ -4407,7 +4418,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateLocateBlinkUI() {
         tvFindBadge?.text = "$locateBlinkCount Nhịp Còi & Đèn"
-        if (activeBlinkDialogRef?.isShowing == true) {
+        if (activeBlinkDialogRef?.isShowing == true && !isUserInteractingWithBlinkDialog) {
             sbBlinkCountRef?.progress = (locateBlinkCount - 1).coerceIn(0, 9)
             tvBlinkCountValRef?.text = "$locateBlinkCount lần"
 
@@ -4457,13 +4468,15 @@ class MainActivity : AppCompatActivity() {
         tvBlinkCountVal?.text = "$currentCount lần"
         sbBlinkCount?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(p0: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser) {
-                    currentCount = progress + 1
-                    tvBlinkCountVal?.text = "$currentCount lần"
-                }
+                currentCount = progress + 1
+                tvBlinkCountVal?.text = "$currentCount lần"
             }
-            override fun onStartTrackingTouch(p0: SeekBar?) {}
-            override fun onStopTrackingTouch(p0: SeekBar?) {}
+            override fun onStartTrackingTouch(p0: SeekBar?) {
+                isUserInteractingWithBlinkDialog = true
+            }
+            override fun onStopTrackingTouch(p0: SeekBar?) {
+                isUserInteractingWithBlinkDialog = false
+            }
         })
 
         // 2. Thời gian sáng (100 - 1000ms, bước 50ms)
@@ -4471,13 +4484,15 @@ class MainActivity : AppCompatActivity() {
         tvBlinkOnTimeVal?.text = "$currentOnMs ms"
         sbBlinkOnTime?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(p0: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser) {
-                    currentOnMs = 100 + progress * 50
-                    tvBlinkOnTimeVal?.text = "$currentOnMs ms"
-                }
+                currentOnMs = 100 + progress * 50
+                tvBlinkOnTimeVal?.text = "$currentOnMs ms"
             }
-            override fun onStartTrackingTouch(p0: SeekBar?) {}
-            override fun onStopTrackingTouch(p0: SeekBar?) {}
+            override fun onStartTrackingTouch(p0: SeekBar?) {
+                isUserInteractingWithBlinkDialog = true
+            }
+            override fun onStopTrackingTouch(p0: SeekBar?) {
+                isUserInteractingWithBlinkDialog = false
+            }
         })
 
         // 3. Thời gian nghỉ (50 - 500ms, bước 50ms)
@@ -4485,28 +4500,38 @@ class MainActivity : AppCompatActivity() {
         tvBlinkOffTimeVal?.text = "$currentOffMs ms"
         sbBlinkOffTime?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(p0: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser) {
-                    currentOffMs = 50 + progress * 50
-                    tvBlinkOffTimeVal?.text = "$currentOffMs ms"
-                }
+                currentOffMs = 50 + progress * 50
+                tvBlinkOffTimeVal?.text = "$currentOffMs ms"
             }
-            override fun onStartTrackingTouch(p0: SeekBar?) {}
-            override fun onStopTrackingTouch(p0: SeekBar?) {}
+            override fun onStartTrackingTouch(p0: SeekBar?) {
+                isUserInteractingWithBlinkDialog = true
+            }
+            override fun onStopTrackingTouch(p0: SeekBar?) {
+                isUserInteractingWithBlinkDialog = false
+            }
         })
 
         btnTest?.setOnClickListener {
+            val actualCount = (sbBlinkCount?.progress ?: (currentCount - 1)) + 1
+            val actualOnMs = 100 + (sbBlinkOnTime?.progress ?: ((currentOnMs - 100) / 50)) * 50
+            val actualOffMs = 50 + (sbBlinkOffTime?.progress ?: ((currentOffMs - 50) / 50)) * 50
+
             if (!isConnectedToVehicle()) {
                 Toast.makeText(this, "Chưa kết nối xe để phát thử!", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            sendVehicleCommand("TEST_LOCATE_CFG|$currentCount|$currentOnMs|$currentOffMs")
-            Toast.makeText(this, "🔔 Đang phát thử: $currentCount lần ($currentOnMs ms / $currentOffMs ms)", Toast.LENGTH_SHORT).show()
+            sendVehicleCommand("TEST_LOCATE_CFG|$actualCount|$actualOnMs|$actualOffMs")
+            Toast.makeText(this, "🔔 Đang phát thử: $actualCount lần ($actualOnMs ms / $actualOffMs ms)", Toast.LENGTH_SHORT).show()
         }
 
         btnSave?.setOnClickListener {
-            locateBlinkCount = currentCount
-            locateOnTimeMs = currentOnMs
-            locateOffTimeMs = currentOffMs
+            val actualCount = (sbBlinkCount?.progress ?: (currentCount - 1)) + 1
+            val actualOnMs = 100 + (sbBlinkOnTime?.progress ?: ((currentOnMs - 100) / 50)) * 50
+            val actualOffMs = 50 + (sbBlinkOffTime?.progress ?: ((currentOffMs - 50) / 50)) * 50
+
+            locateBlinkCount = actualCount
+            locateOnTimeMs = actualOnMs
+            locateOffTimeMs = actualOffMs
 
             getSharedPreferences("BT_PREF", MODE_PRIVATE).edit()
                 .putInt("LOCATE_BLINK_COUNT", locateBlinkCount)
@@ -4518,10 +4543,10 @@ class MainActivity : AppCompatActivity() {
 
             if (isConnectedToVehicle()) {
                 sendVehicleCommand("SET_LOCATE_CFG|$locateBlinkCount|$locateOnTimeMs|$locateOffTimeMs")
-                Toast.makeText(this, "✅ Đã gửi cài đặt sang xe! Xe sẽ nháy xi-nhan để xác nhận.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "✅ Đã lưu cài đặt ($locateBlinkCount lần)! Xe sẽ nháy xi-nhan để xác nhận.", Toast.LENGTH_SHORT).show()
             } else {
                 needSyncLocateCfgToVehicle = true
-                Toast.makeText(this, "⚠️ Đã lưu trên máy. Sẽ tự động nạp sang xe ngay khi kết nối!", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "⚠️ Đã lưu trên máy ($locateBlinkCount lần). Sẽ tự động nạp sang xe ngay khi kết nối!", Toast.LENGTH_LONG).show()
             }
             dialog.dismiss()
         }
@@ -4529,6 +4554,7 @@ class MainActivity : AppCompatActivity() {
         btnClose?.setOnClickListener { dialog.dismiss() }
 
         dialog.setOnDismissListener {
+            isUserInteractingWithBlinkDialog = false
             sbBlinkCountRef = null
             tvBlinkCountValRef = null
             sbBlinkOnTimeRef = null

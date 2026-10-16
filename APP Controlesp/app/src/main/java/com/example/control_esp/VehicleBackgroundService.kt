@@ -190,7 +190,7 @@ class VehicleBackgroundService : Service() {
             if (!BleManager.isConnected) {
                 isReconnecting = true
                 Log.d(TAG, "Background re-connecting BLE to $mac...")
-                BleManager.connect(this, mac) { success ->
+                BleManager.connectWithScan(this, mac) { success ->
                     isReconnecting = false
                     if (success) {
                         Log.i(TAG, "Background BLE connected successfully!")
